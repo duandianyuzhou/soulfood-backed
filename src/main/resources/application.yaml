@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: soulfood-backend
+server:
+  servlet:
+    context-path: /soulfood
