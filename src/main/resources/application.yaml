@@ -1,6 +1,21 @@
 spring:
   application:
     name: soulfood-backend
+  datasource:
+    url: jdbc:postgresql://pgm-2vc574u66oe06366.pgsql.cn-chengdu.rds.aliyuncs.com:5432/food?stringtype=unspecified
+    username: commerce
+    password: nxVRjxu6iVKIoTmC
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      minimum-idle: 2
+      maximum-pool-size: 50
+      auto-commit: true
+      idle-timeout: 30000
+      pool-name: foodServiceHikariPool
+      max-lifetime: 1800000
+      connection-timeout: 30000
+      connection-test-query: SELECT 1
 server:
   servlet:
     context-path: /soulfood
+
