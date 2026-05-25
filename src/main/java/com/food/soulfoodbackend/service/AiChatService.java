@@ -25,14 +25,17 @@ public class AiChatService {
     private final ChatClient chatClient;
     private final ChatClient statelessChatClient;
     private final ChatMemory chatMemory;
+    private final AiConversationService conversationService;
 
     public AiChatService(
             @Qualifier("chatClient") ChatClient chatClient,
             @Qualifier("statelessChatClient") ChatClient statelessChatClient,
-            ChatMemory chatMemory) {
+            ChatMemory chatMemory,
+            AiConversationService conversationService) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
+        this.conversationService = conversationService;
     }
 
     public String resolveConversationId(String conversationId) {
@@ -42,7 +45,8 @@ public class AiChatService {
         return UUID.randomUUID().toString();
     }
 
-    public String chat(String conversationId, String message) {
+    public String chat(String conversationId, String message, Long userId) {
+        conversationService.ensureConversation(conversationId, userId);
         return safeCall(() -> chatClient.prompt()
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
@@ -50,7 +54,8 @@ public class AiChatService {
                 .content(), "今天可以试试番茄炒蛋，简单又下饭。");
     }
 
-    public Flux<String> chatStream(String conversationId, String message) {
+    public Flux<String> chatStream(String conversationId, String message, Long userId) {
+        conversationService.ensureConversation(conversationId, userId);
         return chatClient.prompt()
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))

@@ -1,6 +1,7 @@
 package com.food.soulfoodbackend.controller;
 
 import com.food.soulfoodbackend.common.ApiResult;
+import com.food.soulfoodbackend.common.UserContext;
 import com.food.soulfoodbackend.dto.ChatRequest;
 import com.food.soulfoodbackend.dto.ChatResponse;
 import com.food.soulfoodbackend.dto.ai.RandomPickRequest;
@@ -39,7 +40,7 @@ public class AiChatController {
     @PostMapping("/chat")
     public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) {
         String conversationId = aiChatService.resolveConversationId(request.conversationId());
-        String reply = aiChatService.chat(conversationId, request.message());
+        String reply = aiChatService.chat(conversationId, request.message(), UserContext.getUserId());
         return ApiResult.ok(new ChatResponse(conversationId, reply));
     }
 
@@ -48,7 +49,7 @@ public class AiChatController {
             @RequestParam String message,
             @RequestParam(required = false) String conversationId) {
         String resolvedId = aiChatService.resolveConversationId(conversationId);
-        return aiChatService.chatStream(resolvedId, message);
+        return aiChatService.chatStream(resolvedId, message, UserContext.getUserId());
     }
 
     @GetMapping("/chat/{conversationId}/history")
