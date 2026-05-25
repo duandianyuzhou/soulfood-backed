@@ -20,6 +20,7 @@ import com.food.soulfoodbackend.mapper.SfRoomOptionMapper;
 import com.food.soulfoodbackend.mapper.SfUserMapper;
 import com.food.soulfoodbackend.mapper.SfVoteMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +35,11 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class RoomService {
 
+    /** 房间创建后超过该时长自动结束投票 */
+    public static final int AUTO_CLOSE_MINUTES = 30;
+
     private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final DateTimeFormatter ISO_TIME = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final SfRoomMapper roomMapper;
     private final SfRoomOptionMapper optionMapper;
@@ -45,11 +50,12 @@ public class RoomService {
 
     @Transactional
     public CreateRoomResponse createRoom(Long ownerId, CreateRoomRequest request) {
+        int durationMin = normalizeDurationMin(request.getDurationMin());
         SfRoom room = new SfRoom();
         room.setCode(generateUniqueCode());
         room.setTopic(request.getTopic().trim());
         room.setMaxPeople(request.getMaxPeople());
-        room.setDurationMin(request.getDurationMin());
+        room.setDurationMin(durationMin);
         room.setStatus("voting");
         room.setOwnerId(ownerId);
         room.setCreatedAt(OffsetDateTime.now());
@@ -72,7 +78,7 @@ public class RoomService {
     }
 
     public RoomDetailResponse getRoomDetail(String code, Long currentUserId) {
-        SfRoom room = requireRoom(code);
+        SfRoom room = requireActiveOrClosedRoom(code);
         List<SfRoomOption> options = listOptions(room.getId());
         int totalVotes = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
         Long myVoteOptionId = null;
@@ -94,6 +100,9 @@ public class RoomService {
             optionDtos.add(new RoomOptionDto(option.getId(), option.getTitle(), count, percent, option.getSource()));
         }
 
+        OffsetDateTime expiresAt = expiresAt(room);
+        long remainingSeconds = remainingSeconds(room);
+
         return new RoomDetailResponse(
                 room.getCode(),
                 room.getTopic(),
@@ -102,12 +111,14 @@ public class RoomService {
                 room.getDurationMin(),
                 participants,
                 myVoteOptionId,
+                expiresAt == null ? null : ISO_TIME.format(expiresAt),
+                remainingSeconds,
                 optionDtos
         );
     }
 
     public RoomDetailResponse joinRoom(String code, Long userId) {
-        requireRoom(code);
+        requireActiveOrClosedRoom(code);
         return getRoomDetail(code, userId);
     }
 
@@ -125,6 +136,10 @@ public class RoomService {
 
         List<FriendRoomDto> result = new ArrayList<>();
         for (SfRoom room : rooms) {
+            closeIfExpired(room);
+            if (!"voting".equals(room.getStatus()) && !"open".equals(room.getStatus())) {
+                continue;
+            }
             SfUser owner = userMapper.selectById(room.getOwnerId());
             int participants = Math.toIntExact(voteMapper.selectCount(new LambdaQueryWrapper<SfVote>()
                     .eq(SfVote::getRoomId, room.getId())));
@@ -143,7 +158,7 @@ public class RoomService {
 
     @Transactional
     public RoomOptionDto addOption(String code, AddOptionRequest request) {
-        SfRoom room = requireRoom(code);
+        SfRoom room = requireOpenRoom(code);
         int order = listOptions(room.getId()).size();
         SfRoomOption option = insertOption(room.getId(), request.getTitle().trim(),
                 request.getSource() != null ? request.getSource() : "manual", order);
@@ -152,7 +167,7 @@ public class RoomService {
 
     @Transactional
     public RoomDetailResponse castVote(String code, Long userId, CastVoteRequest request) {
-        SfRoom room = requireRoom(code);
+        SfRoom room = requireOpenRoom(code);
         SfRoomOption target = optionMapper.selectById(request.getOptionId());
         if (target == null || !target.getRoomId().equals(room.getId())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "选项不存在");
@@ -191,17 +206,105 @@ public class RoomService {
         return getRoomDetail(code, userId);
     }
 
+    @Transactional
     public RoomResultResponse getResult(String code, Long userId) {
-        SfRoom room = requireRoom(code);
+        SfRoom room = requireActiveOrClosedRoom(code);
+        if ("closed".equals(room.getStatus())) {
+            return buildResultFromRoom(room);
+        }
+        return closeRoomWithWinner(room, userId);
+    }
+
+    /** 每分钟扫描并自动结束超时房间 */
+    @Scheduled(fixedRate = 60_000)
+    @Transactional
+    public void closeExpiredRoomsJob() {
+        List<SfRoom> rooms = roomMapper.selectList(new LambdaQueryWrapper<SfRoom>()
+                .in(SfRoom::getStatus, List.of("open", "voting")));
+        for (SfRoom room : rooms) {
+            if (isExpired(room)) {
+                closeRoomWithWinner(room, room.getOwnerId());
+            }
+        }
+    }
+
+    private SfRoom requireActiveOrClosedRoom(String code) {
+        SfRoom room = findRoom(code);
+        closeIfExpired(room);
+        return roomMapper.selectById(room.getId());
+    }
+
+    private SfRoom requireOpenRoom(String code) {
+        SfRoom room = requireActiveOrClosedRoom(code);
+        if ("closed".equals(room.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "投票已结束（超过30分钟或已手动结束）");
+        }
+        return room;
+    }
+
+    private SfRoom findRoom(String code) {
+        SfRoom room = roomMapper.selectOne(new LambdaQueryWrapper<SfRoom>().eq(SfRoom::getCode, code));
+        if (room == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "房间不存在");
+        }
+        return room;
+    }
+
+    private void closeIfExpired(SfRoom room) {
+        if ("closed".equals(room.getStatus()) || !isExpired(room)) {
+            return;
+        }
+        closeRoomWithWinner(room, room.getOwnerId());
+    }
+
+    private boolean isExpired(SfRoom room) {
+        OffsetDateTime expiresAt = expiresAt(room);
+        return expiresAt != null && OffsetDateTime.now().isAfter(expiresAt);
+    }
+
+    private OffsetDateTime expiresAt(SfRoom room) {
+        if (room.getCreatedAt() == null) {
+            return null;
+        }
+        int minutes = room.getDurationMin() == null ? AUTO_CLOSE_MINUTES : Math.min(room.getDurationMin(), AUTO_CLOSE_MINUTES);
+        return room.getCreatedAt().plusMinutes(minutes);
+    }
+
+    private long remainingSeconds(SfRoom room) {
+        if ("closed".equals(room.getStatus())) {
+            return 0L;
+        }
+        OffsetDateTime expiresAt = expiresAt(room);
+        if (expiresAt == null) {
+            return 0L;
+        }
+        long seconds = java.time.Duration.between(OffsetDateTime.now(), expiresAt).getSeconds();
+        return Math.max(0L, seconds);
+    }
+
+    private int normalizeDurationMin(Integer durationMin) {
+        if (durationMin == null || durationMin <= 0) {
+            return AUTO_CLOSE_MINUTES;
+        }
+        return Math.min(durationMin, AUTO_CLOSE_MINUTES);
+    }
+
+    @Transactional
+    protected RoomResultResponse closeRoomWithWinner(SfRoom room, Long userId) {
+        if ("closed".equals(room.getStatus())) {
+            return buildResultFromRoom(room);
+        }
         List<SfRoomOption> options = listOptions(room.getId());
         if (options.isEmpty()) {
+            room.setStatus("closed");
+            room.setClosedAt(OffsetDateTime.now());
+            room.setUpdatedAt(OffsetDateTime.now());
+            roomMapper.updateById(room);
             throw new BusinessException(ErrorCode.NOT_FOUND, "暂无投票选项");
         }
         SfRoomOption winner = options.stream()
                 .max(Comparator.comparingInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()))
                 .orElseThrow();
-        int total = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
-        int percent = total == 0 ? 0 : (int) Math.round(winner.getVoteCount() * 100.0 / total);
 
         room.setWinnerOptionId(winner.getId());
         room.setStatus("closed");
@@ -209,18 +312,36 @@ public class RoomService {
         room.setUpdatedAt(OffsetDateTime.now());
         roomMapper.updateById(room);
 
-        if (userId != null) {
-            activityRecordService.recordRoomResult(userId, room.getCode(), winner.getTitle());
+        Long recordUserId = userId != null ? userId : room.getOwnerId();
+        if (recordUserId != null) {
+            activityRecordService.recordRoomResult(recordUserId, room.getCode(), winner.getTitle());
         }
+
+        int total = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
+        int percent = total == 0 ? 0 : (int) Math.round(winner.getVoteCount() * 100.0 / total);
         return new RoomResultResponse(winner.getId(), winner.getTitle(), winner.getVoteCount(), percent);
     }
 
-    private SfRoom requireRoom(String code) {
-        SfRoom room = roomMapper.selectOne(new LambdaQueryWrapper<SfRoom>().eq(SfRoom::getCode, code));
-        if (room == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "房间不存在");
+    private RoomResultResponse buildResultFromRoom(SfRoom room) {
+        if (room.getWinnerOptionId() != null) {
+            SfRoomOption winner = optionMapper.selectById(room.getWinnerOptionId());
+            if (winner != null) {
+                List<SfRoomOption> options = listOptions(room.getId());
+                int total = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
+                int percent = total == 0 ? 0 : (int) Math.round(winner.getVoteCount() * 100.0 / total);
+                return new RoomResultResponse(winner.getId(), winner.getTitle(), winner.getVoteCount(), percent);
+            }
         }
-        return room;
+        List<SfRoomOption> options = listOptions(room.getId());
+        if (options.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "暂无投票结果");
+        }
+        SfRoomOption winner = options.stream()
+                .max(Comparator.comparingInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()))
+                .orElseThrow();
+        int total = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
+        int percent = total == 0 ? 0 : (int) Math.round(winner.getVoteCount() * 100.0 / total);
+        return new RoomResultResponse(winner.getId(), winner.getTitle(), winner.getVoteCount(), percent);
     }
 
     private List<SfRoomOption> listOptions(Long roomId) {

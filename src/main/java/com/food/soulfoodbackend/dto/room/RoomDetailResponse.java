@@ -16,5 +16,7 @@ public class RoomDetailResponse {
     private Integer durationMin;
     private Integer participantCount;
     private Long myVoteOptionId;
+    private String expiresAt;
+    private Long remainingSeconds;
     private List<RoomOptionDto> options;
 }

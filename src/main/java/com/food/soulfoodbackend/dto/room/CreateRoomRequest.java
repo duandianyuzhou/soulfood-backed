@@ -20,8 +20,8 @@ public class CreateRoomRequest {
     private Integer maxPeople = 4;
 
     @Min(5)
-    @Max(120)
-    private Integer durationMin = 20;
+    @Max(30)
+    private Integer durationMin = 30;
 
     private List<@NotBlank String> initialOptions;
 }
