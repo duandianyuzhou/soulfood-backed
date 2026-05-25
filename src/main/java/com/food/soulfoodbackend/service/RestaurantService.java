@@ -69,6 +69,33 @@ public class RestaurantService {
                 .toList();
     }
 
+    public RestaurantDto getById(Long userId, Long restaurantId) {
+        SfRestaurant restaurant = restaurantMapper.selectById(restaurantId);
+        if (restaurant == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "餐厅不存在");
+        }
+        boolean wanted = false;
+        boolean favorited = false;
+        if (userId != null) {
+            wanted = restaurantWantMapper.selectCount(new LambdaQueryWrapper<SfRestaurantWant>()
+                    .eq(SfRestaurantWant::getUserId, userId)
+                    .eq(SfRestaurantWant::getRestaurantId, restaurantId)) > 0;
+            favorited = favoriteMapper.selectCount(new LambdaQueryWrapper<SfFavorite>()
+                    .eq(SfFavorite::getUserId, userId)
+                    .eq(SfFavorite::getTargetType, "restaurant")
+                    .eq(SfFavorite::getTargetId, restaurantId)) > 0;
+        }
+        return new RestaurantDto(
+                restaurant.getId(),
+                restaurant.getName(),
+                restaurant.getCategory(),
+                restaurant.getRating(),
+                restaurant.getDistanceKm(),
+                restaurant.getAddress(),
+                wanted,
+                favorited);
+    }
+
     public void markWant(Long userId, Long restaurantId) {
         SfRestaurant restaurant = restaurantMapper.selectById(restaurantId);
         if (restaurant == null) {

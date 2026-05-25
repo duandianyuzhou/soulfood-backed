@@ -28,6 +28,11 @@ public class RestaurantController {
         return ApiResult.ok(restaurantService.listNearby(UserContext.getUserId(), category, keyword));
     }
 
+    @GetMapping("/{id}")
+    public ApiResult<RestaurantDto> detail(@PathVariable Long id) {
+        return ApiResult.ok(restaurantService.getById(UserContext.getUserId(), id));
+    }
+
     @PostMapping("/{id}/want")
     public ApiResult<Boolean> want(@PathVariable Long id) {
         restaurantService.markWant(UserContext.requireUserId(), id);

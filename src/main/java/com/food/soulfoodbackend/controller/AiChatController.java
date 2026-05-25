@@ -4,6 +4,8 @@ import com.food.soulfoodbackend.common.ApiResult;
 import com.food.soulfoodbackend.common.UserContext;
 import com.food.soulfoodbackend.dto.ChatRequest;
 import com.food.soulfoodbackend.dto.ChatResponse;
+import com.food.soulfoodbackend.dto.ai.AiConversationItemDto;
+import com.food.soulfoodbackend.dto.ai.ChatHistoryMessageDto;
 import com.food.soulfoodbackend.dto.ai.RandomPickRequest;
 import com.food.soulfoodbackend.dto.ai.RandomPickResponse;
 import com.food.soulfoodbackend.dto.ai.RecommendRecipesRequest;
@@ -12,7 +14,6 @@ import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import com.food.soulfoodbackend.service.AiChatService;
 import jakarta.validation.Valid;
-import org.springframework.ai.chat.messages.Message;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,14 +54,19 @@ public class AiChatController {
     }
 
     @GetMapping("/chat/{conversationId}/history")
-    public List<Message> history(@PathVariable String conversationId) {
-        return aiChatService.getHistory(conversationId);
+    public ApiResult<List<ChatHistoryMessageDto>> history(@PathVariable String conversationId) {
+        return ApiResult.ok(aiChatService.getHistoryMessages(conversationId, UserContext.getUserId()));
+    }
+
+    @GetMapping("/conversations")
+    public ApiResult<List<AiConversationItemDto>> conversations() {
+        return ApiResult.ok(aiChatService.listConversations(UserContext.getUserId()));
     }
 
     @DeleteMapping("/chat/{conversationId}")
-    public Map<String, String> clearMemory(@PathVariable String conversationId) {
-        aiChatService.clearMemory(conversationId);
-        return Map.of("conversationId", conversationId, "status", "cleared");
+    public ApiResult<Map<String, String>> clearMemory(@PathVariable String conversationId) {
+        aiChatService.clearMemory(conversationId, UserContext.getUserId());
+        return ApiResult.ok(Map.of("conversationId", conversationId, "status", "cleared"));
     }
 
     @GetMapping("/recommend")

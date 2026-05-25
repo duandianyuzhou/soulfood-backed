@@ -10,6 +10,7 @@ import com.food.soulfoodbackend.mapper.SfFavoriteMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -19,6 +20,8 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class FavoriteService {
+
+    private static final int SUBTITLE_MAX = 256;
 
     private final SfFavoriteMapper favoriteMapper;
     private final ActivityRecordService activityRecordService;
@@ -36,15 +39,17 @@ public class FavoriteService {
     @Transactional
     public FavoriteItemDto addFavorite(Long userId, AddFavoriteRequest request) {
         String targetType = request.getTargetType().trim();
-        if (!"recipe".equals(targetType) && !"restaurant".equals(targetType)) {
+        if (!"recipe".equals(targetType) && !"restaurant".equals(targetType) && !"ai_reply".equals(targetType)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "收藏类型无效");
         }
 
         LambdaQueryWrapper<SfFavorite> existingQuery = new LambdaQueryWrapper<SfFavorite>()
                 .eq(SfFavorite::getUserId, userId)
                 .eq(SfFavorite::getTargetType, targetType);
-        if ("restaurant".equals(targetType) && request.getTargetId() != null) {
+        if (request.getTargetId() != null && ("restaurant".equals(targetType) || "recipe".equals(targetType))) {
             existingQuery.eq(SfFavorite::getTargetId, request.getTargetId());
+        } else if ("ai_reply".equals(targetType) && StringUtils.hasText(request.getContent())) {
+            existingQuery.eq(SfFavorite::getTitle, buildAiReplyTitle(request.getContent()));
         } else {
             existingQuery.eq(SfFavorite::getTitle, request.getTitle().trim());
         }
@@ -63,19 +68,32 @@ public class FavoriteService {
         if (request.getDuration() != null && !request.getDuration().isBlank()) {
             meta.put("duration", request.getDuration());
         }
+        if ("ai_reply".equals(targetType) && StringUtils.hasText(request.getContent())) {
+            meta.put("fullContent", request.getContent());
+        }
+        if (StringUtils.hasText(request.getConversationId())) {
+            meta.put("conversationId", request.getConversationId().trim());
+        }
+
+        String title = request.getTitle().trim();
+        String subtitle = request.getSubtitle();
+        if ("ai_reply".equals(targetType) && StringUtils.hasText(request.getContent())) {
+            title = buildAiReplyTitle(request.getContent());
+            subtitle = truncate(request.getContent(), SUBTITLE_MAX);
+        }
 
         SfFavorite row = new SfFavorite();
         row.setUserId(userId);
         row.setTargetType(targetType);
         row.setTargetId(request.getTargetId());
-        row.setTitle(request.getTitle().trim());
-        row.setSubtitle(request.getSubtitle());
+        row.setTitle(title);
+        row.setSubtitle(subtitle);
         row.setMetaJson(meta.isEmpty() ? null : JsonStrings.toJson(meta));
         row.setCreatedAt(OffsetDateTime.now());
         row.setDeleted(false);
         favoriteMapper.insert(row);
 
-        activityRecordService.recordFavorite(userId, request.getTitle());
+        activityRecordService.recordFavorite(userId, title);
         return toDto(row);
     }
 
@@ -103,6 +121,10 @@ public class FavoriteService {
 
     private FavoriteItemDto toDto(SfFavorite row) {
         Map<String, String> meta = JsonStrings.parseStringMap(row.getMetaJson());
+        String content = meta.get("fullContent");
+        if (content == null && "ai_reply".equals(row.getTargetType()) && row.getSubtitle() != null) {
+            content = row.getSubtitle();
+        }
         return new FavoriteItemDto(
                 row.getId(),
                 row.getTargetType(),
@@ -111,6 +133,24 @@ public class FavoriteService {
                 row.getSubtitle(),
                 meta.get("category"),
                 meta.get("score"),
-                meta.get("duration"));
+                meta.get("duration"),
+                content,
+                meta.get("conversationId"));
+    }
+
+    private static String buildAiReplyTitle(String content) {
+        String line = content.lines()
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .findFirst()
+                .orElse("AI 回复");
+        return truncate(line.replaceAll("[#*`>]", "").trim(), 64);
+    }
+
+    private static String truncate(String text, int max) {
+        if (text.length() <= max) {
+            return text;
+        }
+        return text.substring(0, max) + "…";
     }
 }

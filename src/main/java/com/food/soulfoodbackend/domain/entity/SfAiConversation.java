@@ -13,6 +13,7 @@ public class SfAiConversation {
     @TableId
     private String id;
     private Long userId;
+    private String title;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

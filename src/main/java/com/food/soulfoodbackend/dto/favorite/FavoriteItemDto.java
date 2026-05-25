@@ -15,4 +15,6 @@ public class FavoriteItemDto {
     private String category;
     private String score;
     private String duration;
+    private String content;
+    private String conversationId;
 }

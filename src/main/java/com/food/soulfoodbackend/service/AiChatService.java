@@ -12,6 +12,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.MessageType;
+import com.food.soulfoodbackend.dto.ai.AiConversationItemDto;
+import com.food.soulfoodbackend.dto.ai.ChatHistoryMessageDto;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -47,6 +50,7 @@ public class AiChatService {
 
     public String chat(String conversationId, String message, Long userId) {
         conversationService.ensureConversation(conversationId, userId);
+        conversationService.setTitleIfBlank(conversationId, message);
         return safeCall(() -> chatClient.prompt()
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
@@ -63,12 +67,27 @@ public class AiChatService {
                 .content();
     }
 
-    public List<Message> getHistory(String conversationId) {
-        return chatMemory.get(conversationId);
+    public List<ChatHistoryMessageDto> getHistoryMessages(String conversationId, Long userId) {
+        conversationService.assertOwnedByUser(conversationId, userId);
+        return chatMemory.get(conversationId).stream()
+                .filter(m -> m.getMessageType() == MessageType.USER || m.getMessageType() == MessageType.ASSISTANT)
+                .map(this::toHistoryDto)
+                .toList();
     }
 
-    public void clearMemory(String conversationId) {
+    public List<AiConversationItemDto> listConversations(Long userId) {
+        return conversationService.listForUser(userId);
+    }
+
+    public void clearMemory(String conversationId, Long userId) {
+        conversationService.assertOwnedByUser(conversationId, userId);
         chatMemory.clear(conversationId);
+    }
+
+    private ChatHistoryMessageDto toHistoryDto(Message message) {
+        String role = message.getMessageType() == MessageType.USER ? "user" : "assistant";
+        String content = message.getText() != null ? message.getText() : "";
+        return new ChatHistoryMessageDto(role, content);
     }
 
     public String recommend(String preference) {

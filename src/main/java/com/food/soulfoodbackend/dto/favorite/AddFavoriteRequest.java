@@ -22,4 +22,10 @@ public class AddFavoriteRequest {
     private String category;
     private String score;
     private String duration;
+
+    /** AI 回复全文（targetType=ai_reply 时使用） */
+    private String content;
+
+    /** AI 会话 ID（可选） */
+    private String conversationId;
 }
