@@ -3,7 +3,14 @@ package com.food.soulfoodbackend.controller;
 import com.food.soulfoodbackend.common.ApiResult;
 import com.food.soulfoodbackend.dto.ChatRequest;
 import com.food.soulfoodbackend.dto.ChatResponse;
+import com.food.soulfoodbackend.dto.ai.RandomPickRequest;
+import com.food.soulfoodbackend.dto.ai.RandomPickResponse;
+import com.food.soulfoodbackend.dto.ai.RecommendRecipesRequest;
+import com.food.soulfoodbackend.dto.ai.RecommendRecipesResponse;
+import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
+import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import com.food.soulfoodbackend.service.AiChatService;
+import jakarta.validation.Valid;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -58,6 +65,21 @@ public class AiChatController {
     @GetMapping("/recommend")
     public ApiResult<ChatResponse> recommend(@RequestParam(defaultValue = "清淡、少油、适合晚餐") String preference) {
         return ApiResult.ok(new ChatResponse(null, aiChatService.recommend(preference)));
+    }
+
+    @PostMapping("/recommend/recipes")
+    public ApiResult<RecommendRecipesResponse> recommendRecipes(@RequestBody RecommendRecipesRequest request) {
+        return ApiResult.ok(aiChatService.recommendRecipes(request));
+    }
+
+    @PostMapping("/suggest-options")
+    public ApiResult<SuggestOptionsResponse> suggestOptions(@Valid @RequestBody SuggestOptionsRequest request) {
+        return ApiResult.ok(aiChatService.suggestOptions(request));
+    }
+
+    @PostMapping("/random-pick")
+    public ApiResult<RandomPickResponse> randomPick(@Valid @RequestBody RandomPickRequest request) {
+        return ApiResult.ok(aiChatService.randomPick(request));
     }
 }
 
