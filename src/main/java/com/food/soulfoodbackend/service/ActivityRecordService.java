@@ -36,6 +36,10 @@ public class ActivityRecordService {
         save(userId, "eat", "标记想去", restaurantName, null);
     }
 
+    public void recordFavorite(Long userId, String title) {
+        save(userId, "favorite", "收藏：" + title, "已加入我的收藏", null);
+    }
+
     private void save(Long userId, String type, String title, String summary, Long refId) {
         SfActivityRecord record = new SfActivityRecord();
         record.setUserId(userId);
