@@ -33,4 +33,12 @@ public class AiConfig {
                 .build();
     }
 
+    /** 无会话记忆，用于菜谱推荐、随机选店等一次性调用 */
+    @Bean
+    public ChatClient statelessChatClient(ChatModel chatModel) {
+        return ChatClient.builder(chatModel)
+                .defaultSystem(SYSTEM_PROMPT)
+                .build();
+    }
+
 }

@@ -1,11 +1,13 @@
 package com.food.soulfoodbackend.common;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
@@ -20,6 +22,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ApiResult<Void> handleOther(Exception ex) {
+        log.error("Unhandled exception", ex);
         return ApiResult.fail(ErrorCode.INTERNAL.getCode(), ErrorCode.INTERNAL.getMessage());
     }
 }
