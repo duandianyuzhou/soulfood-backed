@@ -41,14 +41,32 @@ public class AiChatController {
     @PostMapping("/chat")
     public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) {
         String conversationId = aiChatService.resolveConversationId(request.conversationId());
-        String reply = aiChatService.chat(conversationId, request.message(), UserContext.getUserId());
-        return ApiResult.ok(new ChatResponse(conversationId, reply));
+        ChatResponse response = aiChatService.chat(
+                conversationId,
+                request.message(),
+                UserContext.getUserId(),
+                request.lat(),
+                request.lng());
+        return ApiResult.ok(response);
+    }
+
+    @PostMapping(value = "/chat/stream", produces = "application/x-ndjson;charset=UTF-8")
+    public Flux<String> chatStreamPost(@RequestBody ChatRequest request) {
+        String resolvedId = aiChatService.resolveConversationId(request.conversationId());
+        return aiChatService.chatStreamNdjson(
+                resolvedId,
+                request.message(),
+                UserContext.getUserId(),
+                request.lat(),
+                request.lng());
     }
 
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chatStream(
             @RequestParam String message,
-            @RequestParam(required = false) String conversationId) {
+            @RequestParam(required = false) String conversationId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
         String resolvedId = aiChatService.resolveConversationId(conversationId);
         return aiChatService.chatStream(resolvedId, message, UserContext.getUserId());
     }
@@ -71,7 +89,7 @@ public class AiChatController {
 
     @GetMapping("/recommend")
     public ApiResult<ChatResponse> recommend(@RequestParam(defaultValue = "清淡、少油、适合晚餐") String preference) {
-        return ApiResult.ok(new ChatResponse(null, aiChatService.recommend(preference)));
+        return ApiResult.ok(new ChatResponse(null, aiChatService.recommend(preference), List.of()));
     }
 
     @PostMapping("/recommend/recipes")

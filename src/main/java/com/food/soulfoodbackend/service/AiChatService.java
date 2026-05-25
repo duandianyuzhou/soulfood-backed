@@ -1,5 +1,11 @@
 package com.food.soulfoodbackend.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.food.soulfoodbackend.dto.ChatResponse;
+import com.food.soulfoodbackend.dto.ai.AiConversationItemDto;
+import com.food.soulfoodbackend.dto.ai.ChatActionCardDto;
+import com.food.soulfoodbackend.dto.ai.ChatHistoryMessageDto;
 import com.food.soulfoodbackend.dto.ai.RandomPickRequest;
 import com.food.soulfoodbackend.dto.ai.RandomPickResponse;
 import com.food.soulfoodbackend.dto.ai.RecipeItemDto;
@@ -8,18 +14,20 @@ import com.food.soulfoodbackend.dto.ai.RecommendRecipesResponse;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
-import com.food.soulfoodbackend.dto.ai.AiConversationItemDto;
-import com.food.soulfoodbackend.dto.ai.ChatHistoryMessageDto;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 @Slf4j
@@ -29,16 +37,25 @@ public class AiChatService {
     private final ChatClient statelessChatClient;
     private final ChatMemory chatMemory;
     private final AiConversationService conversationService;
+    private final AiChatContextService contextService;
+    private final ChatActionCardResolver cardResolver;
+    private final ObjectMapper objectMapper;
 
     public AiChatService(
             @Qualifier("chatClient") ChatClient chatClient,
             @Qualifier("statelessChatClient") ChatClient statelessChatClient,
             ChatMemory chatMemory,
-            AiConversationService conversationService) {
+            AiConversationService conversationService,
+            AiChatContextService contextService,
+            ChatActionCardResolver cardResolver,
+            ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
         this.conversationService = conversationService;
+        this.contextService = contextService;
+        this.cardResolver = cardResolver;
+        this.objectMapper = objectMapper;
     }
 
     public String resolveConversationId(String conversationId) {
@@ -48,23 +65,53 @@ public class AiChatService {
         return UUID.randomUUID().toString();
     }
 
-    public String chat(String conversationId, String message, Long userId) {
-        conversationService.ensureConversation(conversationId, userId);
-        conversationService.setTitleIfBlank(conversationId, message);
-        return safeCall(() -> chatClient.prompt()
+    public ChatResponse chat(String conversationId, String message, Long userId, Double lat, Double lng) {
+        prepareConversation(conversationId, userId, message);
+        String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
+        String reply = safeCall(() -> chatClient.prompt()
+                .system(systemPrompt)
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content(), "今天可以试试番茄炒蛋，简单又下饭。");
+        List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
+        return new ChatResponse(conversationId, reply, cards);
     }
 
-    public Flux<String> chatStream(String conversationId, String message, Long userId) {
-        conversationService.ensureConversation(conversationId, userId);
-        return chatClient.prompt()
+    public Flux<String> chatStreamNdjson(
+            String conversationId, String message, Long userId, Double lat, Double lng) {
+        prepareConversation(conversationId, userId, message);
+        String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
+        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+
+        Flux<String> chunks = chatClient.prompt()
+                .system(systemPrompt)
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .stream()
-                .content();
+                .content()
+                .map(chunk -> {
+                    buffer.get().append(chunk);
+                    return toNdjson(Map.of("type", "chunk", "text", chunk));
+                });
+
+        Mono<String> done = Mono.fromCallable(() -> {
+            String fullReply = buffer.get().toString();
+            List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("type", "done");
+            payload.put("conversationId", conversationId);
+            payload.put("cards", cards);
+            return toNdjson(payload);
+        });
+
+        return chunks.concatWith(done.flux());
+    }
+
+    public Flux<String> chatStream(String conversationId, String message, Long userId) {
+        return chatStreamNdjson(conversationId, message, userId, null, null)
+                .filter(line -> line.contains("\"type\":\"chunk\""))
+                .map(line -> extractChunkText(line));
     }
 
     public List<ChatHistoryMessageDto> getHistoryMessages(String conversationId, Long userId) {
@@ -84,10 +131,32 @@ public class AiChatService {
         chatMemory.clear(conversationId);
     }
 
+    private void prepareConversation(String conversationId, Long userId, String message) {
+        conversationService.ensureConversation(conversationId, userId);
+        conversationService.setTitleIfBlank(conversationId, message);
+    }
+
     private ChatHistoryMessageDto toHistoryDto(Message message) {
         String role = message.getMessageType() == MessageType.USER ? "user" : "assistant";
         String content = message.getText() != null ? message.getText() : "";
         return new ChatHistoryMessageDto(role, content);
+    }
+
+    private String toNdjson(Map<String, Object> payload) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException ex) {
+            return "{\"type\":\"error\",\"message\":\"序列化失败\"}";
+        }
+    }
+
+    private String extractChunkText(String line) {
+        try {
+            var node = objectMapper.readTree(line);
+            return node.path("text").asText("");
+        } catch (JsonProcessingException ex) {
+            return "";
+        }
     }
 
     public String recommend(String preference) {

@@ -1,4 +1,6 @@
 package com.food.soulfoodbackend.dto;
 
-public record ChatRequest(String conversationId, String message) {
+import java.util.List;
+
+public record ChatRequest(String conversationId, String message, Double lat, Double lng) {
 }
