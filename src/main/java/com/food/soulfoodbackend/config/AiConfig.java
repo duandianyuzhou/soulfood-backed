@@ -22,7 +22,7 @@ public class AiConfig {
     public ChatMemory chatMemory(PgChatMemoryRepository chatMemoryRepository) {
         return MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
-                .maxMessages(20)
+                .maxMessages(30)
                 .build();
     }
 

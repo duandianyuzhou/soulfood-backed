@@ -22,6 +22,7 @@ public class AiChatContextService {
 
     private final UserPreferenceService preferenceService;
     private final FavoriteService favoriteService;
+    private final AiUserMemoryService memoryService;
 
     public String buildSystemPrompt(Long userId, Double lat, Double lng) {
         StringBuilder sb = new StringBuilder(BASE_INSTRUCTION);
@@ -34,6 +35,7 @@ public class AiChatContextService {
                         .append(favorites.stream().map(FavoriteItemDto::getTitle)
                                 .reduce((a, b) -> a + "、" + b).orElse(""));
             }
+            sb.append(memoryService.buildMemoryContextBlock(userId));
         } else {
             sb.append("\n- 口味偏好：未登录，按大众口味推荐");
         }
@@ -43,5 +45,13 @@ public class AiChatContextService {
         }
         sb.append("\n请结合以上信息个性化回答，避免推荐用户忌口的内容。");
         return sb.toString();
+    }
+
+    public String buildVisionSystemPrompt(Long userId, Double lat, Double lng) {
+        return buildSystemPrompt(userId, lat, lng) + """
+                
+                【识图模式】用户发送了图片，可能是冰箱食材、菜单或菜品照片。
+                请识别可见食材/菜品，推荐可做的菜或点单建议，语气简洁实用。
+                """;
     }
 }

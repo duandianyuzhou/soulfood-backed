@@ -48,7 +48,9 @@ public class AiChatController {
                 request.message(),
                 UserContext.getUserId(),
                 request.lat(),
-                request.lng());
+                request.lng(),
+                request.imageBase64(),
+                request.imageMimeType());
         return ApiResult.ok(response);
     }
 
@@ -60,7 +62,9 @@ public class AiChatController {
                 request.message(),
                 UserContext.getUserId(),
                 request.lat(),
-                request.lng());
+                request.lng(),
+                request.imageBase64(),
+                request.imageMimeType());
     }
 
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

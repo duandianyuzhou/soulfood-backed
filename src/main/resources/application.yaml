@@ -60,3 +60,6 @@ app:
     default-lat: 30.657462
     search-radius: 3000
     page-size: 20
+  ai:
+    vision-model: glm-4v-flash
+    memory-extraction-enabled: true

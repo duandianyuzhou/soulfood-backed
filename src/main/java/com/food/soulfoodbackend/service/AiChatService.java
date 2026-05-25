@@ -19,10 +19,19 @@ import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Base64;
 
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +52,10 @@ public class AiChatService {
     private final AiChatMessageMetaService messageMetaService;
     private final SfAiChatMessageMapper messageMapper;
     private final ObjectMapper objectMapper;
+    private final AiMemoryExtractionService memoryExtractionService;
+
+    @Value("${app.ai.vision-model:glm-4v-flash}")
+    private String visionModel;
 
     public AiChatService(
             @Qualifier("chatClient") ChatClient chatClient,
@@ -53,7 +66,8 @@ public class AiChatService {
             ChatActionCardResolver cardResolver,
             AiChatMessageMetaService messageMetaService,
             SfAiChatMessageMapper messageMapper,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AiMemoryExtractionService memoryExtractionService) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
@@ -63,6 +77,7 @@ public class AiChatService {
         this.messageMetaService = messageMetaService;
         this.messageMapper = messageMapper;
         this.objectMapper = objectMapper;
+        this.memoryExtractionService = memoryExtractionService;
     }
 
     public String resolveConversationId(String conversationId) {
@@ -72,19 +87,35 @@ public class AiChatService {
         return UUID.randomUUID().toString();
     }
 
-    public ChatResponse chat(String conversationId, String message, Long userId, Double lat, Double lng) {
-        prepareConversation(conversationId, userId, message);
-        String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
+    public ChatResponse chat(
+            String conversationId,
+            String message,
+            Long userId,
+            Double lat,
+            Double lng,
+            String imageBase64,
+            String imageMimeType) {
+        String userText = normalizeMessage(message, imageBase64);
+        prepareConversation(conversationId, userId, userText);
+        boolean hasImage = hasImage(imageBase64);
+        String systemPrompt = hasImage
+                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
+                : contextService.buildSystemPrompt(userId, lat, lng);
         try {
             AiChatToolContextHolder.set(userId, lat, lng, conversationId);
-            String reply = safeCall(() -> chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(message)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .call()
-                    .content(), "今天可以试试番茄炒蛋，简单又下饭。");
+            String reply = safeCall(() -> {
+                var spec = chatClient.prompt().system(systemPrompt);
+                applyUser(spec, userText, imageBase64, imageMimeType);
+                if (hasImage) {
+                    spec.options(visionOptions());
+                }
+                return spec.advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                        .call()
+                        .content();
+            }, "今天可以试试番茄炒蛋，简单又下饭。");
             List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
             messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
             return new ChatResponse(conversationId, reply, cards);
         } finally {
             AiChatToolContextHolder.clear();
@@ -92,15 +123,29 @@ public class AiChatService {
     }
 
     public Flux<String> chatStreamNdjson(
-            String conversationId, String message, Long userId, Double lat, Double lng) {
-        prepareConversation(conversationId, userId, message);
-        String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
+            String conversationId,
+            String message,
+            Long userId,
+            Double lat,
+            Double lng,
+            String imageBase64,
+            String imageMimeType) {
+        String userText = normalizeMessage(message, imageBase64);
+        prepareConversation(conversationId, userId, userText);
+        boolean hasImage = hasImage(imageBase64);
+        String systemPrompt = hasImage
+                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
+                : contextService.buildSystemPrompt(userId, lat, lng);
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
         AiChatToolContextHolder.set(userId, lat, lng, conversationId);
 
-        Flux<String> chunks = chatClient.prompt()
-                .system(systemPrompt)
-                .user(message)
+        var requestSpec = chatClient.prompt().system(systemPrompt);
+        applyUser(requestSpec, userText, imageBase64, imageMimeType);
+        if (hasImage) {
+            requestSpec.options(visionOptions());
+        }
+
+        Flux<String> chunks = requestSpec
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .stream()
                 .content()
@@ -114,6 +159,7 @@ public class AiChatService {
                 String fullReply = buffer.get().toString();
                 List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
                 messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+                memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("type", "done");
                 payload.put("conversationId", conversationId);
@@ -129,9 +175,56 @@ public class AiChatService {
     }
 
     public Flux<String> chatStream(String conversationId, String message, Long userId) {
-        return chatStreamNdjson(conversationId, message, userId, null, null)
+        return chatStreamNdjson(conversationId, message, userId, null, null, null, null)
                 .filter(line -> line.contains("\"type\":\"chunk\""))
                 .map(line -> extractChunkText(line));
+    }
+
+    private void applyUser(
+            ChatClient.ChatClientRequestSpec spec,
+            String message,
+            String imageBase64,
+            String imageMimeType) {
+        if (!hasImage(imageBase64)) {
+            spec.user(message);
+            return;
+        }
+        byte[] bytes = decodeImage(imageBase64);
+        MimeType mime = MimeType.valueOf(
+                StringUtils.hasText(imageMimeType) ? imageMimeType : "image/jpeg");
+        Media media = Media.builder().mimeType(mime).data(new ByteArrayResource(bytes)).build();
+        spec.user(u -> u.text(message).media(media));
+    }
+
+    private ChatOptions visionOptions() {
+        return OpenAiChatOptions.builder().model(visionModel).build();
+    }
+
+    private static boolean hasImage(String imageBase64) {
+        return StringUtils.hasText(imageBase64);
+    }
+
+    private static String normalizeMessage(String message, String imageBase64) {
+        if (StringUtils.hasText(message)) {
+            return message.trim();
+        }
+        if (hasImage(imageBase64)) {
+            return "请识别图片中的食材或菜品，并推荐可以做什么菜或怎么点单。";
+        }
+        return "";
+    }
+
+    private static byte[] decodeImage(String imageBase64) {
+        String payload = imageBase64.trim();
+        int comma = payload.indexOf(',');
+        if (payload.startsWith("data:") && comma > 0) {
+            payload = payload.substring(comma + 1);
+        }
+        byte[] bytes = Base64.getDecoder().decode(payload);
+        if (bytes.length > 4 * 1024 * 1024) {
+            throw new IllegalArgumentException("图片过大，请压缩后重试（最大 4MB）");
+        }
+        return bytes;
     }
 
     public List<ChatHistoryMessageDto> getHistoryMessages(String conversationId, Long userId) {
