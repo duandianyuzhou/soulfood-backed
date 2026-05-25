@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.amap")
 public class AmapProperties {
 
-    /** 高德 Web 服务 Key，通过环境变量 AMAP_API_KEY 注入 */
+    /** 高德 Web 服务 Key：后端调用 restapi.amap.com 使用，配置在 application-local.yaml 或环境变量 AMAP_API_KEY */
     private String apiKey = "";
 
     private String baseUrl = "https://restapi.amap.com";

@@ -30,7 +30,7 @@ public class AmapPoiClient {
 
     public List<AmapPoi> searchNearby(double lng, double lat, String category, String keyword) {
         if (!StringUtils.hasText(properties.getApiKey())) {
-            throw new BusinessException(ErrorCode.INTERNAL, "未配置高德地图 API Key，请设置环境变量 AMAP_API_KEY");
+            throw new BusinessException(ErrorCode.INTERNAL, "未配置高德地图 API Key，请在 application-local.yaml 设置 app.amap.api-key");
         }
 
         String location = formatCoordinate(lng) + "," + formatCoordinate(lat);
