@@ -40,11 +40,15 @@ public class FavoriteService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "收藏类型无效");
         }
 
-        SfFavorite existing = favoriteMapper.selectOne(new LambdaQueryWrapper<SfFavorite>()
+        LambdaQueryWrapper<SfFavorite> existingQuery = new LambdaQueryWrapper<SfFavorite>()
                 .eq(SfFavorite::getUserId, userId)
-                .eq(SfFavorite::getTargetType, targetType)
-                .eq(SfFavorite::getTitle, request.getTitle().trim())
-                .last("LIMIT 1"));
+                .eq(SfFavorite::getTargetType, targetType);
+        if ("restaurant".equals(targetType) && request.getTargetId() != null) {
+            existingQuery.eq(SfFavorite::getTargetId, request.getTargetId());
+        } else {
+            existingQuery.eq(SfFavorite::getTitle, request.getTitle().trim());
+        }
+        SfFavorite existing = favoriteMapper.selectOne(existingQuery.last("LIMIT 1"));
         if (existing != null) {
             return toDto(existing);
         }
@@ -82,6 +86,19 @@ public class FavoriteService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "收藏不存在");
         }
         favoriteMapper.deleteById(favoriteId);
+    }
+
+    @Transactional
+    public void removeByTarget(Long userId, String targetType, Long targetId) {
+        SfFavorite row = favoriteMapper.selectOne(new LambdaQueryWrapper<SfFavorite>()
+                .eq(SfFavorite::getUserId, userId)
+                .eq(SfFavorite::getTargetType, targetType)
+                .eq(SfFavorite::getTargetId, targetId)
+                .last("LIMIT 1"));
+        if (row == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "收藏不存在");
+        }
+        favoriteMapper.deleteById(row.getId());
     }
 
     private FavoriteItemDto toDto(SfFavorite row) {

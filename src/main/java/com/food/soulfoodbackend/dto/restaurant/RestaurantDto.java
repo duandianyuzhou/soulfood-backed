@@ -16,4 +16,5 @@ public class RestaurantDto {
     private BigDecimal distanceKm;
     private String address;
     private boolean wanted;
+    private boolean favorited;
 }

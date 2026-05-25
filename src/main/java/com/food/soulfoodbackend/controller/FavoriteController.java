@@ -41,4 +41,12 @@ public class FavoriteController {
         favoriteService.removeFavorite(UserContext.requireUserId(), id);
         return ApiResult.ok(Map.of("status", "removed"));
     }
+
+    @DeleteMapping("/target/{targetType}/{targetId}")
+    public ApiResult<Map<String, String>> removeByTarget(
+            @PathVariable String targetType,
+            @PathVariable Long targetId) {
+        favoriteService.removeByTarget(UserContext.requireUserId(), targetType, targetId);
+        return ApiResult.ok(Map.of("status", "removed"));
+    }
 }

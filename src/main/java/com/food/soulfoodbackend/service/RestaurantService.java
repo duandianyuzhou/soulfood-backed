@@ -3,9 +3,11 @@ package com.food.soulfoodbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.common.BusinessException;
 import com.food.soulfoodbackend.common.ErrorCode;
+import com.food.soulfoodbackend.domain.entity.SfFavorite;
 import com.food.soulfoodbackend.domain.entity.SfRestaurant;
 import com.food.soulfoodbackend.domain.entity.SfRestaurantWant;
 import com.food.soulfoodbackend.dto.restaurant.RestaurantDto;
+import com.food.soulfoodbackend.mapper.SfFavoriteMapper;
 import com.food.soulfoodbackend.mapper.SfRestaurantMapper;
 import com.food.soulfoodbackend.mapper.SfRestaurantWantMapper;
 import com.food.soulfoodbackend.service.ActivityRecordService;
@@ -24,6 +26,7 @@ public class RestaurantService {
 
     private final SfRestaurantMapper restaurantMapper;
     private final SfRestaurantWantMapper restaurantWantMapper;
+    private final SfFavoriteMapper favoriteMapper;
     private final ActivityRecordService activityRecordService;
 
     public List<RestaurantDto> listNearby(Long userId, String category, String keyword) {
@@ -36,14 +39,23 @@ public class RestaurantService {
             wrapper.and(w -> w.like(SfRestaurant::getName, keyword).or().like(SfRestaurant::getCategory, keyword));
         }
         Set<Long> wantedIds = Set.of();
+        Set<Long> favoritedIds = Set.of();
         if (userId != null) {
             wantedIds = restaurantWantMapper.selectList(new LambdaQueryWrapper<SfRestaurantWant>()
                             .eq(SfRestaurantWant::getUserId, userId))
                     .stream()
                     .map(SfRestaurantWant::getRestaurantId)
                     .collect(Collectors.toSet());
+            favoritedIds = favoriteMapper.selectList(new LambdaQueryWrapper<SfFavorite>()
+                            .eq(SfFavorite::getUserId, userId)
+                            .eq(SfFavorite::getTargetType, "restaurant")
+                            .isNotNull(SfFavorite::getTargetId))
+                    .stream()
+                    .map(SfFavorite::getTargetId)
+                    .collect(Collectors.toSet());
         }
         Set<Long> finalWantedIds = wantedIds;
+        Set<Long> finalFavoritedIds = favoritedIds;
         return restaurantMapper.selectList(wrapper).stream()
                 .map(r -> new RestaurantDto(
                         r.getId(),
@@ -52,7 +64,8 @@ public class RestaurantService {
                         r.getRating(),
                         r.getDistanceKm(),
                         r.getAddress(),
-                        finalWantedIds.contains(r.getId())))
+                        finalWantedIds.contains(r.getId()),
+                        finalFavoritedIds.contains(r.getId())))
                 .toList();
     }
 
