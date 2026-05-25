@@ -15,6 +15,9 @@ public class SfUser {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String openId;
+    private String username;
+    private String passwordHash;
+    private String inviteCode;
     private String nickname;
     private String avatarUrl;
     private String signature;
