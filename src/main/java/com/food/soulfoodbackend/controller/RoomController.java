@@ -6,6 +6,7 @@ import com.food.soulfoodbackend.dto.room.AddOptionRequest;
 import com.food.soulfoodbackend.dto.room.CastVoteRequest;
 import com.food.soulfoodbackend.dto.room.CreateRoomRequest;
 import com.food.soulfoodbackend.dto.room.CreateRoomResponse;
+import com.food.soulfoodbackend.dto.room.FriendRoomDto;
 import com.food.soulfoodbackend.dto.room.RoomDetailResponse;
 import com.food.soulfoodbackend.dto.room.RoomOptionDto;
 import com.food.soulfoodbackend.dto.room.RoomResultResponse;
@@ -19,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/rooms")
 @RequiredArgsConstructor
@@ -29,6 +32,11 @@ public class RoomController {
     @PostMapping
     public ApiResult<CreateRoomResponse> create(@Valid @RequestBody CreateRoomRequest request) {
         return ApiResult.ok(roomService.createRoom(UserContext.requireUserId(), request));
+    }
+
+    @GetMapping("/friends")
+    public ApiResult<List<FriendRoomDto>> friendRooms() {
+        return ApiResult.ok(roomService.listFriendRooms(UserContext.requireUserId()));
     }
 
     @GetMapping("/{code}")

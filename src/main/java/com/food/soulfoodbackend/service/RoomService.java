@@ -6,21 +6,25 @@ import com.food.soulfoodbackend.common.ErrorCode;
 import com.food.soulfoodbackend.domain.entity.SfRoom;
 import com.food.soulfoodbackend.domain.entity.SfRoomOption;
 import com.food.soulfoodbackend.domain.entity.SfVote;
+import com.food.soulfoodbackend.domain.entity.SfUser;
 import com.food.soulfoodbackend.dto.room.AddOptionRequest;
 import com.food.soulfoodbackend.dto.room.CastVoteRequest;
 import com.food.soulfoodbackend.dto.room.CreateRoomRequest;
 import com.food.soulfoodbackend.dto.room.CreateRoomResponse;
+import com.food.soulfoodbackend.dto.room.FriendRoomDto;
 import com.food.soulfoodbackend.dto.room.RoomDetailResponse;
 import com.food.soulfoodbackend.dto.room.RoomOptionDto;
 import com.food.soulfoodbackend.dto.room.RoomResultResponse;
 import com.food.soulfoodbackend.mapper.SfRoomMapper;
 import com.food.soulfoodbackend.mapper.SfRoomOptionMapper;
+import com.food.soulfoodbackend.mapper.SfUserMapper;
 import com.food.soulfoodbackend.mapper.SfVoteMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,9 +34,13 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class RoomService {
 
+    private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
     private final SfRoomMapper roomMapper;
     private final SfRoomOptionMapper optionMapper;
     private final SfVoteMapper voteMapper;
+    private final SfUserMapper userMapper;
+    private final FriendService friendService;
     private final ActivityRecordService activityRecordService;
 
     @Transactional
@@ -101,6 +109,36 @@ public class RoomService {
     public RoomDetailResponse joinRoom(String code, Long userId) {
         requireRoom(code);
         return getRoomDetail(code, userId);
+    }
+
+    public List<FriendRoomDto> listFriendRooms(Long userId) {
+        List<Long> friendIds = friendService.listFriendUserIds(userId);
+        if (friendIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<SfRoom> rooms = roomMapper.selectList(new LambdaQueryWrapper<SfRoom>()
+                .in(SfRoom::getOwnerId, friendIds)
+                .in(SfRoom::getStatus, List.of("open", "voting"))
+                .orderByDesc(SfRoom::getCreatedAt)
+                .last("LIMIT 20"));
+
+        List<FriendRoomDto> result = new ArrayList<>();
+        for (SfRoom room : rooms) {
+            SfUser owner = userMapper.selectById(room.getOwnerId());
+            int participants = Math.toIntExact(voteMapper.selectCount(new LambdaQueryWrapper<SfVote>()
+                    .eq(SfVote::getRoomId, room.getId())));
+            result.add(new FriendRoomDto(
+                    room.getCode(),
+                    room.getTopic(),
+                    room.getStatus(),
+                    room.getOwnerId(),
+                    owner != null ? owner.getNickname() : "好友",
+                    participants,
+                    room.getCreatedAt() == null ? "" : DISPLAY_TIME.format(room.getCreatedAt())
+            ));
+        }
+        return result;
     }
 
     @Transactional

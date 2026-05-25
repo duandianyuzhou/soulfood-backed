@@ -28,6 +28,7 @@ public class InviteService {
     private final SfInviteMapper inviteMapper;
     private final SfUserMapper userMapper;
     private final UserAccountHelper userAccountHelper;
+    private final FriendService friendService;
 
     public InviteOverviewResponse overview(Long userId) {
         SfUser user = userMapper.selectById(userId);
@@ -76,6 +77,7 @@ public class InviteService {
                 .eq(SfInvite::getInviteeId, inviteeId)
                 .last("LIMIT 1"));
         if (existing != null) {
+            friendService.bindFriends(inviter.getId(), inviteeId, "invite");
             return;
         }
 
@@ -88,5 +90,6 @@ public class InviteService {
         invite.setCreatedAt(OffsetDateTime.now());
         invite.setCompletedAt(OffsetDateTime.now());
         inviteMapper.insert(invite);
+        friendService.bindFriends(inviter.getId(), inviteeId, "invite");
     }
 }
