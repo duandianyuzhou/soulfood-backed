@@ -12,5 +12,6 @@ public class AiConversationItemDto {
     private String id;
     private String title;
     private String preview;
+    private String sceneTag;
     private OffsetDateTime updatedAt;
 }

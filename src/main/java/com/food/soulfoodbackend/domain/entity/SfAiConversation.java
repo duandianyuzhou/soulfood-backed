@@ -14,6 +14,7 @@ public class SfAiConversation {
     private String id;
     private Long userId;
     private String title;
+    private String sceneTag;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

@@ -1,5 +1,6 @@
 package com.food.soulfoodbackend.config;
 
+import com.food.soulfoodbackend.service.AiChatTools;
 import com.food.soulfoodbackend.chat.PgChatMemoryRepository;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -26,9 +27,10 @@ public class AiConfig {
     }
 
     @Bean
-    public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory) {
+    public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory, AiChatTools aiChatTools) {
         return ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
+                .defaultTools(aiChatTools)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }

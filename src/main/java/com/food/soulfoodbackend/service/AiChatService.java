@@ -1,7 +1,10 @@
 package com.food.soulfoodbackend.service;
 
+import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.food.soulfoodbackend.domain.entity.SfAiChatMessage;
 import com.food.soulfoodbackend.dto.ChatResponse;
 import com.food.soulfoodbackend.dto.ai.AiConversationItemDto;
 import com.food.soulfoodbackend.dto.ai.ChatActionCardDto;
@@ -16,8 +19,6 @@ import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -39,6 +40,8 @@ public class AiChatService {
     private final AiConversationService conversationService;
     private final AiChatContextService contextService;
     private final ChatActionCardResolver cardResolver;
+    private final AiChatMessageMetaService messageMetaService;
+    private final SfAiChatMessageMapper messageMapper;
     private final ObjectMapper objectMapper;
 
     public AiChatService(
@@ -48,6 +51,8 @@ public class AiChatService {
             AiConversationService conversationService,
             AiChatContextService contextService,
             ChatActionCardResolver cardResolver,
+            AiChatMessageMetaService messageMetaService,
+            SfAiChatMessageMapper messageMapper,
             ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
@@ -55,6 +60,8 @@ public class AiChatService {
         this.conversationService = conversationService;
         this.contextService = contextService;
         this.cardResolver = cardResolver;
+        this.messageMetaService = messageMetaService;
+        this.messageMapper = messageMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -68,14 +75,20 @@ public class AiChatService {
     public ChatResponse chat(String conversationId, String message, Long userId, Double lat, Double lng) {
         prepareConversation(conversationId, userId, message);
         String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
-        String reply = safeCall(() -> chatClient.prompt()
-                .system(systemPrompt)
-                .user(message)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .content(), "今天可以试试番茄炒蛋，简单又下饭。");
-        List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
-        return new ChatResponse(conversationId, reply, cards);
+        try {
+            AiChatToolContextHolder.set(userId, lat, lng, conversationId);
+            String reply = safeCall(() -> chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(message)
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                    .call()
+                    .content(), "今天可以试试番茄炒蛋，简单又下饭。");
+            List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
+            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+            return new ChatResponse(conversationId, reply, cards);
+        } finally {
+            AiChatToolContextHolder.clear();
+        }
     }
 
     public Flux<String> chatStreamNdjson(
@@ -83,6 +96,7 @@ public class AiChatService {
         prepareConversation(conversationId, userId, message);
         String systemPrompt = contextService.buildSystemPrompt(userId, lat, lng);
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+        AiChatToolContextHolder.set(userId, lat, lng, conversationId);
 
         Flux<String> chunks = chatClient.prompt()
                 .system(systemPrompt)
@@ -96,16 +110,22 @@ public class AiChatService {
                 });
 
         Mono<String> done = Mono.fromCallable(() -> {
-            String fullReply = buffer.get().toString();
-            List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("type", "done");
-            payload.put("conversationId", conversationId);
-            payload.put("cards", cards);
-            return toNdjson(payload);
+            try {
+                String fullReply = buffer.get().toString();
+                List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
+                messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("type", "done");
+                payload.put("conversationId", conversationId);
+                payload.put("cards", cards);
+                return toNdjson(payload);
+            } finally {
+                AiChatToolContextHolder.clear();
+            }
         });
 
-        return chunks.concatWith(done.flux());
+        return chunks.concatWith(done.flux())
+                .doFinally(signal -> AiChatToolContextHolder.clear());
     }
 
     public Flux<String> chatStream(String conversationId, String message, Long userId) {
@@ -116,14 +136,27 @@ public class AiChatService {
 
     public List<ChatHistoryMessageDto> getHistoryMessages(String conversationId, Long userId) {
         conversationService.assertOwnedByUser(conversationId, userId);
-        return chatMemory.get(conversationId).stream()
-                .filter(m -> m.getMessageType() == MessageType.USER || m.getMessageType() == MessageType.ASSISTANT)
-                .map(this::toHistoryDto)
-                .toList();
+        List<SfAiChatMessage> rows = messageMapper.selectList(new LambdaQueryWrapper<SfAiChatMessage>()
+                .eq(SfAiChatMessage::getConversationId, conversationId)
+                .in(SfAiChatMessage::getMessageType, "USER", "ASSISTANT")
+                .orderByAsc(SfAiChatMessage::getSortOrder)
+                .orderByAsc(SfAiChatMessage::getId));
+        return rows.stream().map(this::toHistoryDto).toList();
     }
 
-    public List<AiConversationItemDto> listConversations(Long userId) {
-        return conversationService.listForUser(userId);
+    private ChatHistoryMessageDto toHistoryDto(SfAiChatMessage row) {
+        String role = "USER".equals(row.getMessageType()) ? "user" : "assistant";
+        String content = row.getContent() != null ? row.getContent() : "";
+        List<ChatActionCardDto> cards = messageMetaService.parseCards(row.getMetaJson());
+        return new ChatHistoryMessageDto(role, content, cards);
+    }
+
+    public List<AiConversationItemDto> listConversations(Long userId, String keyword, String sceneTag) {
+        return conversationService.listForUser(userId, keyword, sceneTag);
+    }
+
+    public void updateConversation(String conversationId, Long userId, String title, String sceneTag) {
+        conversationService.updateConversation(conversationId, userId, title, sceneTag);
     }
 
     public void clearMemory(String conversationId, Long userId) {
@@ -134,12 +167,6 @@ public class AiChatService {
     private void prepareConversation(String conversationId, Long userId, String message) {
         conversationService.ensureConversation(conversationId, userId);
         conversationService.setTitleIfBlank(conversationId, message);
-    }
-
-    private ChatHistoryMessageDto toHistoryDto(Message message) {
-        String role = message.getMessageType() == MessageType.USER ? "user" : "assistant";
-        String content = message.getText() != null ? message.getText() : "";
-        return new ChatHistoryMessageDto(role, content);
     }
 
     private String toNdjson(Map<String, Object> payload) {

@@ -7,7 +7,7 @@ import lombok.Data;
 @AllArgsConstructor
 public class ChatActionCardDto {
 
-    /** recipe | restaurant */
+    /** recipe | restaurant | vote_room */
     private String type;
     private Long id;
     private String name;

@@ -22,6 +22,10 @@ public class ChatActionCardResolver {
     private final RestaurantService restaurantService;
 
     public List<ChatActionCardDto> resolve(String reply, Long userId, Double lat, Double lng) {
+        return merge(AiChatToolContextHolder.toolCards(), resolveFromText(reply, userId, lat, lng));
+    }
+
+    private List<ChatActionCardDto> resolveFromText(String reply, Long userId, Double lat, Double lng) {
         if (reply == null || reply.isBlank()) {
             return List.of();
         }
@@ -71,5 +75,26 @@ public class ChatActionCardResolver {
             }
         }
         return cards;
+    }
+
+    private List<ChatActionCardDto> merge(List<ChatActionCardDto> toolCards, List<ChatActionCardDto> textCards) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<ChatActionCardDto> merged = new ArrayList<>();
+        for (ChatActionCardDto card : toolCards) {
+            String key = card.getType() + ":" + card.getId() + ":" + card.getName();
+            if (seen.add(key)) {
+                merged.add(card);
+            }
+        }
+        for (ChatActionCardDto card : textCards) {
+            String key = card.getType() + ":" + card.getId() + ":" + card.getName();
+            if (seen.add(key)) {
+                merged.add(card);
+            }
+            if (merged.size() >= MAX_CARDS) {
+                break;
+            }
+        }
+        return merged.size() > MAX_CARDS ? merged.subList(0, MAX_CARDS) : merged;
     }
 }

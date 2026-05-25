@@ -69,12 +69,27 @@ public class AiConversationService {
     }
 
     public List<AiConversationItemDto> listForUser(Long userId) {
+        return listForUser(userId, null, null);
+    }
+
+    public List<AiConversationItemDto> listForUser(Long userId, String keyword, String sceneTag) {
         if (userId == null) {
             return List.of();
         }
-        List<SfAiConversation> rows = conversationMapper.selectList(new LambdaQueryWrapper<SfAiConversation>()
-                .eq(SfAiConversation::getUserId, userId)
-                .orderByDesc(SfAiConversation::getUpdatedAt));
+        LambdaQueryWrapper<SfAiConversation> wrapper = new LambdaQueryWrapper<SfAiConversation>()
+                .eq(SfAiConversation::getUserId, userId);
+        if (sceneTag != null && !sceneTag.isBlank()) {
+            wrapper.eq(SfAiConversation::getSceneTag, sceneTag.trim());
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.trim();
+            List<String> matchedIds = findConversationIdsByMessageContent(userId, kw);
+            wrapper.and(w -> w.like(SfAiConversation::getTitle, kw)
+                    .or()
+                    .in(!matchedIds.isEmpty(), SfAiConversation::getId, matchedIds));
+        }
+        wrapper.orderByDesc(SfAiConversation::getUpdatedAt);
+        List<SfAiConversation> rows = conversationMapper.selectList(wrapper);
         List<AiConversationItemDto> result = new ArrayList<>();
         for (SfAiConversation row : rows) {
             String preview = loadPreview(row.getId());
@@ -82,9 +97,50 @@ public class AiConversationService {
             if (title == null || title.isBlank()) {
                 title = preview.isBlank() ? "新对话" : truncate(preview, TITLE_MAX);
             }
-            result.add(new AiConversationItemDto(row.getId(), title, preview, row.getUpdatedAt()));
+            result.add(new AiConversationItemDto(
+                    row.getId(), title, preview, row.getSceneTag(), row.getUpdatedAt()));
         }
         return result;
+    }
+
+    @Transactional
+    public void updateConversation(String conversationId, Long userId, String title, String sceneTag) {
+        assertOwnedByUser(conversationId, userId);
+        SfAiConversation row = conversationMapper.selectById(conversationId);
+        if (row == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "会话不存在");
+        }
+        boolean changed = false;
+        if (title != null && !title.isBlank()) {
+            row.setTitle(truncate(title.trim(), TITLE_MAX));
+            changed = true;
+        }
+        if (sceneTag != null) {
+            row.setSceneTag(sceneTag.isBlank() ? null : sceneTag.trim());
+            changed = true;
+        }
+        if (changed) {
+            row.setUpdatedAt(OffsetDateTime.now());
+            conversationMapper.updateById(row);
+        }
+    }
+
+    private List<String> findConversationIdsByMessageContent(Long userId, String keyword) {
+        List<SfAiConversation> owned = conversationMapper.selectList(new LambdaQueryWrapper<SfAiConversation>()
+                .eq(SfAiConversation::getUserId, userId)
+                .select(SfAiConversation::getId));
+        if (owned.isEmpty()) {
+            return List.of();
+        }
+        List<String> ids = owned.stream().map(SfAiConversation::getId).toList();
+        return messageMapper.selectList(new LambdaQueryWrapper<SfAiChatMessage>()
+                        .in(SfAiChatMessage::getConversationId, ids)
+                        .like(SfAiChatMessage::getContent, keyword)
+                        .select(SfAiChatMessage::getConversationId))
+                .stream()
+                .map(SfAiChatMessage::getConversationId)
+                .distinct()
+                .toList();
     }
 
     public void assertOwnedByUser(String conversationId, Long userId) {

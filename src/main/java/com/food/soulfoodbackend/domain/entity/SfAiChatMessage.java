@@ -17,5 +17,6 @@ public class SfAiChatMessage {
     private Integer sortOrder;
     private String messageType;
     private String content;
+    private String metaJson;
     private OffsetDateTime createdAt;
 }

@@ -18,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Repository
 @RequiredArgsConstructor
@@ -55,6 +57,8 @@ public class PgChatMemoryRepository implements ChatMemoryRepository {
     public void saveAll(String conversationId, List<Message> messages) {
         conversationService.ensureConversation(conversationId, null);
 
+        Map<String, String> metaByAssistantContent = loadAssistantMetaByContent(conversationId);
+
         messageMapper.delete(new LambdaQueryWrapper<SfAiChatMessage>()
                 .eq(SfAiChatMessage::getConversationId, conversationId));
 
@@ -65,7 +69,12 @@ public class PgChatMemoryRepository implements ChatMemoryRepository {
             row.setConversationId(conversationId);
             row.setSortOrder(order++);
             row.setMessageType(message.getMessageType().name());
-            row.setContent(message.getText() != null ? message.getText() : "");
+            String content = message.getText() != null ? message.getText() : "";
+            row.setContent(content);
+            if (message.getMessageType() == MessageType.ASSISTANT
+                    && metaByAssistantContent.containsKey(content)) {
+                row.setMetaJson(metaByAssistantContent.get(content));
+            }
             row.setCreatedAt(now);
             messageMapper.insert(row);
         }
@@ -76,6 +85,22 @@ public class PgChatMemoryRepository implements ChatMemoryRepository {
     @Transactional
     public void deleteByConversationId(String conversationId) {
         conversationMapper.deleteById(conversationId);
+    }
+
+    private Map<String, String> loadAssistantMetaByContent(String conversationId) {
+        List<SfAiChatMessage> existing = messageMapper.selectList(new LambdaQueryWrapper<SfAiChatMessage>()
+                .eq(SfAiChatMessage::getConversationId, conversationId)
+                .eq(SfAiChatMessage::getMessageType, "ASSISTANT")
+                .isNotNull(SfAiChatMessage::getMetaJson)
+                .orderByAsc(SfAiChatMessage::getSortOrder)
+                .orderByAsc(SfAiChatMessage::getId));
+        Map<String, String> metaByContent = new HashMap<>();
+        for (SfAiChatMessage row : existing) {
+            if (row.getContent() != null && row.getMetaJson() != null) {
+                metaByContent.put(row.getContent(), row.getMetaJson());
+            }
+        }
+        return metaByContent;
     }
 
     private Message toMessage(SfAiChatMessage row) {
