@@ -1,5 +1,6 @@
 package com.food.soulfoodbackend.controller;
 
+import com.food.soulfoodbackend.common.ApiResult;
 import com.food.soulfoodbackend.dto.ChatRequest;
 import com.food.soulfoodbackend.dto.ChatResponse;
 import com.food.soulfoodbackend.service.AiChatService;
@@ -29,10 +30,10 @@ public class AiChatController {
     }
 
     @PostMapping("/chat")
-    public ChatResponse chat(@RequestBody ChatRequest request) {
+    public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) {
         String conversationId = aiChatService.resolveConversationId(request.conversationId());
         String reply = aiChatService.chat(conversationId, request.message());
-        return new ChatResponse(conversationId, reply);
+        return ApiResult.ok(new ChatResponse(conversationId, reply));
     }
 
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -55,8 +56,8 @@ public class AiChatController {
     }
 
     @GetMapping("/recommend")
-    public ChatResponse recommend(@RequestParam(defaultValue = "清淡、少油、适合晚餐") String preference) {
-        return new ChatResponse(null, aiChatService.recommend(preference));
+    public ApiResult<ChatResponse> recommend(@RequestParam(defaultValue = "清淡、少油、适合晚餐") String preference) {
+        return ApiResult.ok(new ChatResponse(null, aiChatService.recommend(preference)));
     }
 }
 
