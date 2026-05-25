@@ -26,6 +26,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final InviteService inviteService;
     private final UserAccountHelper userAccountHelper;
+    private final JwtService jwtService;
 
     public LoginResponse mockLogin(MockLoginRequest request) {
         String openId = "mock:" + request.getDeviceId().trim();
@@ -101,7 +102,8 @@ public class AuthService {
 
     private LoginResponse toLoginResponse(SfUser user) {
         userAccountHelper.ensureInviteCode(user);
-        return new LoginResponse(user.getId(), String.valueOf(user.getId()), user.getNickname(), user.getAvatarUrl());
+        String token = jwtService.createAccessToken(user.getId(), user.getUsername());
+        return new LoginResponse(user.getId(), token, user.getNickname(), user.getAvatarUrl());
     }
 
     private String normalizeUsername(String username) {

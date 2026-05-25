@@ -47,3 +47,7 @@ mybatis-plus:
       logic-delete-value: true
       logic-not-delete-value: false
 
+app:
+  jwt:
+    secret: ${JWT_SECRET:decidemeal-dev-secret-change-in-production-32b}
+    access-token-expire-hours: ${JWT_EXPIRE_HOURS:168}
