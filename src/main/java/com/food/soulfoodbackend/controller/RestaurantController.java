@@ -23,9 +23,11 @@ public class RestaurantController {
 
     @GetMapping("/nearby")
     public ApiResult<List<RestaurantDto>> nearby(
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) Double lat,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword) {
-        return ApiResult.ok(restaurantService.listNearby(UserContext.getUserId(), category, keyword));
+        return ApiResult.ok(restaurantService.listNearby(UserContext.getUserId(), lng, lat, category, keyword));
     }
 
     @GetMapping("/{id}")

@@ -51,3 +51,10 @@ app:
   jwt:
     secret: ${JWT_SECRET:decidemeal-dev-secret-change-in-production-32b}
     access-token-expire-hours: ${JWT_EXPIRE_HOURS:168}
+  amap:
+    api-key: ${AMAP_API_KEY:}
+    base-url: https://restapi.amap.com
+    default-lng: 104.065735
+    default-lat: 30.657462
+    search-radius: 3000
+    page-size: 20
