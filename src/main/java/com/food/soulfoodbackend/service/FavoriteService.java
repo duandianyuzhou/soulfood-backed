@@ -21,6 +21,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class FavoriteService {
 
+    private static final int TITLE_MAX = 128;
     private static final int SUBTITLE_MAX = 256;
 
     private final SfFavoriteMapper favoriteMapper;
@@ -86,8 +87,8 @@ public class FavoriteService {
         row.setUserId(userId);
         row.setTargetType(targetType);
         row.setTargetId(request.getTargetId());
-        row.setTitle(title);
-        row.setSubtitle(subtitle);
+        row.setTitle(truncate(title, TITLE_MAX));
+        row.setSubtitle(subtitle == null ? null : truncate(subtitle, SUBTITLE_MAX));
         row.setMetaJson(meta.isEmpty() ? null : JsonStrings.toJson(meta));
         row.setCreatedAt(OffsetDateTime.now());
         row.setDeleted(false);
@@ -144,13 +145,19 @@ public class FavoriteService {
                 .filter(s -> !s.isBlank())
                 .findFirst()
                 .orElse("AI 回复");
-        return truncate(line.replaceAll("[#*`>]", "").trim(), 64);
+        return truncate(line.replaceAll("[#*`>]", "").trim(), TITLE_MAX);
     }
 
     private static String truncate(String text, int max) {
+        if (text == null || max <= 0) {
+            return text;
+        }
         if (text.length() <= max) {
             return text;
         }
-        return text.substring(0, max) + "…";
+        if (max == 1) {
+            return "…";
+        }
+        return text.substring(0, max - 1) + "…";
     }
 }
