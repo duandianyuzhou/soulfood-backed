@@ -15,6 +15,8 @@ public class SfFriendMessage {
     private Long id;
     private Long conversationId;
     private Long senderId;
+    private String messageType;
     private String content;
+    private String payloadJson;
     private OffsetDateTime createdAt;
 }

@@ -1,6 +1,9 @@
 package com.food.soulfoodbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.food.soulfoodbackend.common.BusinessException;
 import com.food.soulfoodbackend.common.ErrorCode;
 import com.food.soulfoodbackend.domain.entity.SfFriend;
@@ -11,6 +14,7 @@ import com.food.soulfoodbackend.domain.entity.SfUser;
 import com.food.soulfoodbackend.dto.friend.FriendChatConversationDto;
 import com.food.soulfoodbackend.dto.friend.FriendChatMessageDto;
 import com.food.soulfoodbackend.dto.friend.SendFriendMessageRequest;
+import com.food.soulfoodbackend.dto.friend.VoteSharePayloadDto;
 import com.food.soulfoodbackend.friend.ws.FriendChatBroadcastService;
 import com.food.soulfoodbackend.mapper.SfFriendConversationMapper;
 import com.food.soulfoodbackend.mapper.SfFriendConversationReadMapper;
@@ -23,8 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -36,6 +38,8 @@ public class FriendChatService {
     private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 100;
+    private static final String TYPE_TEXT = "text";
+    private static final String TYPE_VOTE_SHARE = "vote_share";
 
     private final SfFriendConversationMapper conversationMapper;
     private final SfFriendMessageMapper messageMapper;
@@ -43,6 +47,7 @@ public class FriendChatService {
     private final SfFriendMapper friendMapper;
     private final SfUserMapper userMapper;
     private final FriendChatBroadcastService broadcastService;
+    private final ObjectMapper objectMapper;
 
     public List<FriendChatConversationDto> listConversations(Long userId) {
         List<SfFriendConversation> conversations = conversationMapper.selectList(
@@ -66,7 +71,7 @@ public class FriendChatService {
                     peer.getId(),
                     peer.getNickname(),
                     peer.getAvatarUrl(),
-                    lastMessage == null ? "" : lastMessage.getContent(),
+                    previewText(lastMessage),
                     lastMessage == null ? "" : formatTime(lastMessage.getCreatedAt()),
                     (int) unread
             ));
@@ -89,7 +94,7 @@ public class FriendChatService {
                 peer.getId(),
                 peer.getNickname(),
                 peer.getAvatarUrl(),
-                lastMessage == null ? "" : lastMessage.getContent(),
+                previewText(lastMessage),
                 lastMessage == null ? "" : formatTime(lastMessage.getCreatedAt()),
                 (int) countUnread(conversation.getId(), userId)
         );
@@ -121,25 +126,11 @@ public class FriendChatService {
         Long peerUserId = peerUserId(conversation, userId);
         assertAreFriends(userId, peerUserId);
 
-        String content = request.getContent().trim();
-        if (content.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "消息不能为空");
+        String type = normalizeMessageType(request.getMessageType());
+        if (TYPE_VOTE_SHARE.equals(type)) {
+            return persistAndBroadcast(conversation, userId, buildVoteShareMessage(request.getVoteShare()));
         }
-
-        OffsetDateTime now = OffsetDateTime.now();
-        SfFriendMessage message = new SfFriendMessage();
-        message.setConversationId(conversation.getId());
-        message.setSenderId(userId);
-        message.setContent(content);
-        message.setCreatedAt(now);
-        messageMapper.insert(message);
-
-        conversation.setUpdatedAt(now);
-        conversationMapper.updateById(conversation);
-
-        FriendChatMessageDto dto = toMessageDto(message, userId);
-        broadcastService.broadcastMessage(conversation.getId(), dto);
-        return dto;
+        return persistAndBroadcast(conversation, userId, buildTextMessage(request.getContent()));
     }
 
     @Transactional
@@ -154,6 +145,63 @@ public class FriendChatService {
 
     public void assertCanAccessConversation(Long userId, Long conversationId) {
         requireParticipantConversation(conversationId, userId);
+    }
+
+    private SfFriendMessage buildTextMessage(String rawContent) {
+        String content = rawContent == null ? "" : rawContent.trim();
+        if (content.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "消息不能为空");
+        }
+        SfFriendMessage message = new SfFriendMessage();
+        message.setMessageType(TYPE_TEXT);
+        message.setContent(content);
+        return message;
+    }
+
+    private SfFriendMessage buildVoteShareMessage(VoteSharePayloadDto payload) {
+        if (payload == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "分享卡数据不能为空");
+        }
+        if (payload.getWinnerTitle() == null || payload.getWinnerTitle().isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "胜出选项不能为空");
+        }
+        if (payload.getRecipes() == null) {
+            payload.setRecipes(List.of());
+        }
+        if (payload.getVoteCount() == null) {
+            payload.setVoteCount(0);
+        }
+        if (payload.getPercent() == null) {
+            payload.setPercent(0);
+        }
+        if (payload.getGhoul() == null) {
+            payload.setGhoul(false);
+        }
+
+        SfFriendMessage message = new SfFriendMessage();
+        message.setMessageType(TYPE_VOTE_SHARE);
+        message.setContent(previewVoteShare(payload));
+        try {
+            message.setPayloadJson(objectMapper.writeValueAsString(payload));
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "分享卡数据格式错误");
+        }
+        return message;
+    }
+
+    private FriendChatMessageDto persistAndBroadcast(SfFriendConversation conversation, Long userId, SfFriendMessage message) {
+        OffsetDateTime now = OffsetDateTime.now();
+        message.setConversationId(conversation.getId());
+        message.setSenderId(userId);
+        message.setCreatedAt(now);
+        messageMapper.insert(message);
+
+        conversation.setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
+
+        FriendChatMessageDto dto = toMessageDto(message, userId);
+        broadcastService.broadcastMessage(conversation.getId(), dto);
+        return dto;
     }
 
     private SfFriendConversation requireParticipantConversation(Long conversationId, Long userId) {
@@ -247,14 +295,50 @@ public class FriendChatService {
     }
 
     private FriendChatMessageDto toMessageDto(SfFriendMessage message, Long userId) {
+        String type = message.getMessageType() == null ? TYPE_TEXT : message.getMessageType();
+        VoteSharePayloadDto voteShare = null;
+        if (TYPE_VOTE_SHARE.equals(type) && message.getPayloadJson() != null && !message.getPayloadJson().isBlank()) {
+            try {
+                voteShare = objectMapper.readValue(message.getPayloadJson(), VoteSharePayloadDto.class);
+            } catch (JsonProcessingException ignored) {
+                // ignore malformed payload
+            }
+        }
         return new FriendChatMessageDto(
                 message.getId(),
                 message.getConversationId(),
                 message.getSenderId(),
+                type,
                 message.getContent(),
                 formatTime(message.getCreatedAt()),
-                Objects.equals(message.getSenderId(), userId)
+                Objects.equals(message.getSenderId(), userId),
+                voteShare
         );
+    }
+
+    private static String previewText(SfFriendMessage message) {
+        if (message == null) {
+            return "";
+        }
+        if (TYPE_VOTE_SHARE.equals(message.getMessageType())) {
+            return message.getContent() != null ? message.getContent() : "[投票结果]";
+        }
+        return message.getContent() == null ? "" : message.getContent();
+    }
+
+    private static String previewVoteShare(VoteSharePayloadDto payload) {
+        return "[投票结果] " + payload.getWinnerTitle().trim();
+    }
+
+    private static String normalizeMessageType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return TYPE_TEXT;
+        }
+        String type = raw.trim().toLowerCase();
+        if (TYPE_VOTE_SHARE.equals(type)) {
+            return TYPE_VOTE_SHARE;
+        }
+        return TYPE_TEXT;
     }
 
     private static Long peerUserId(SfFriendConversation conversation, Long userId) {
