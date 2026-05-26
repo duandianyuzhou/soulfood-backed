@@ -49,6 +49,7 @@ public class RoomService {
     private final SfUserMapper userMapper;
     private final FriendService friendService;
     private final ActivityRecordService activityRecordService;
+    private final NotificationService notificationService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -322,6 +323,8 @@ public class RoomService {
         if (recordUserId != null) {
             activityRecordService.recordRoomResult(recordUserId, room.getCode(), winner.getTitle());
         }
+
+        notificationService.notifyRoomClosed(room, winner);
 
         publishRoomUpdated(room.getCode());
 

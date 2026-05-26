@@ -2,6 +2,7 @@ package com.food.soulfoodbackend.controller;
 
 import com.food.soulfoodbackend.common.ApiResult;
 import com.food.soulfoodbackend.common.UserContext;
+import com.food.soulfoodbackend.dto.auth.ChangePasswordRequest;
 import com.food.soulfoodbackend.dto.auth.LoginResponse;
 import com.food.soulfoodbackend.dto.auth.MockLoginRequest;
 import com.food.soulfoodbackend.dto.auth.PasswordLoginRequest;
@@ -49,5 +50,11 @@ public class AuthController {
     @PatchMapping("/me")
     public ApiResult<UserProfileResponse> updateMe(@Valid @RequestBody UpdateProfileRequest request) {
         return ApiResult.ok(authService.updateProfile(UserContext.requireUserId(), request));
+    }
+
+    @PostMapping("/me/password")
+    public ApiResult<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(UserContext.requireUserId(), request);
+        return ApiResult.ok(null);
     }
 }

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.common.BusinessException;
 import com.food.soulfoodbackend.common.ErrorCode;
 import com.food.soulfoodbackend.domain.entity.SfUser;
+import com.food.soulfoodbackend.dto.auth.ChangePasswordRequest;
 import com.food.soulfoodbackend.dto.auth.LoginResponse;
 import com.food.soulfoodbackend.dto.auth.MockLoginRequest;
 import com.food.soulfoodbackend.dto.auth.PasswordLoginRequest;
@@ -85,6 +86,23 @@ public class AuthService {
         }
         return new UserProfileResponse(user.getId(), user.getUsername(), user.getNickname(),
                 user.getAvatarUrl(), user.getSignature());
+    }
+
+    @Transactional
+    public void changePassword(Long userId, ChangePasswordRequest request) {
+        SfUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "用户不存在");
+        }
+        if (user.getPasswordHash() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "当前账号未设置密码");
+        }
+        if (!passwordEncoder.matches(request.getOldPassword(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "原密码不正确");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setUpdatedAt(OffsetDateTime.now());
+        userMapper.updateById(user);
     }
 
     @Transactional

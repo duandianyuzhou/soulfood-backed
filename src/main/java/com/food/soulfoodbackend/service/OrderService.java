@@ -40,10 +40,6 @@ public class OrderService {
         }
 
         List<SfOrder> rows = orderMapper.selectList(wrapper);
-        if (rows.isEmpty()) {
-            seedDemoOrders(userId);
-            rows = orderMapper.selectList(wrapper);
-        }
 
         boolean hasDemoOrders = rows.stream().anyMatch(r -> "demo".equals(r.getSource()));
 
@@ -111,34 +107,5 @@ public class OrderService {
                 row.getOrderedAt() == null ? "" : TIME_TEXT.format(row.getOrderedAt()),
                 status,
                 row.getSource() == null ? "manual" : row.getSource());
-    }
-
-    private void seedDemoOrders(Long userId) {
-        long count = orderMapper.selectCount(new LambdaQueryWrapper<SfOrder>().eq(SfOrder::getUserId, userId));
-        if (count > 0) {
-            return;
-        }
-        OffsetDateTime now = OffsetDateTime.now();
-        insertDemo(userId, "海底捞（万象城店）", "food", new BigDecimal("168.00"),
-                "2人 · 18:42 · 线下堂食", now.minusDays(15), "demo");
-        insertDemo(userId, "喜茶（万象城店）", "drink", new BigDecimal("38.00"),
-                "2杯 · 15:20 · 外带 · 已评价", now.minusDays(17), "demo");
-        insertDemo(userId, "麦当劳（万象城店）", "fast", new BigDecimal("46.00"),
-                "1人 · 12:05 · 自取 · 待开发票", now.minusDays(19), "demo");
-    }
-
-    private void insertDemo(Long userId, String name, String category, BigDecimal amount,
-                            String summary, OffsetDateTime orderedAt, String source) {
-        SfOrder row = new SfOrder();
-        row.setUserId(userId);
-        row.setRestaurantName(name);
-        row.setCategory(category);
-        row.setAmount(amount);
-        row.setItemSummary(summary);
-        row.setOrderedAt(orderedAt);
-        row.setSource(source);
-        row.setCreatedAt(OffsetDateTime.now());
-        row.setDeleted(false);
-        orderMapper.insert(row);
     }
 }
