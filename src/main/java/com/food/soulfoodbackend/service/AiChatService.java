@@ -2,6 +2,8 @@ package com.food.soulfoodbackend.service;
 
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.food.soulfoodbackend.domain.entity.SfAiChatMessage;
@@ -33,6 +35,8 @@ import reactor.core.publisher.Mono;
 
 import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Objects;
+import java.time.Duration;
 
 import java.util.HashMap;
 import java.util.List;
@@ -54,6 +58,7 @@ public class AiChatService {
     private final SfAiChatMessageMapper messageMapper;
     private final ObjectMapper objectMapper;
     private final AiMemoryExtractionService memoryExtractionService;
+    private final Cache<String, RecommendRecipesResponse> recipeRecommendCache;
 
     @Value("${app.ai.vision-model:glm-4v-flash}")
     private String visionModel;
@@ -79,6 +84,10 @@ public class AiChatService {
         this.messageMapper = messageMapper;
         this.objectMapper = objectMapper;
         this.memoryExtractionService = memoryExtractionService;
+        this.recipeRecommendCache = Caffeine.newBuilder()
+                .maximumSize(500)
+                .expireAfterWrite(Duration.ofMinutes(3))
+                .build();
     }
 
     public String resolveConversationId(String conversationId) {
@@ -303,6 +312,11 @@ public class AiChatService {
     public RecommendRecipesResponse recommendRecipes(RecommendRecipesRequest request) {
         String preference = request.getPreference() != null ? request.getPreference() : "清淡、家常菜";
         String winner = request.getVoteWinner() != null ? request.getVoteWinner() : "";
+        String cacheKey = preference + "|" + winner + "|" + Objects.toString(request.getParticipants(), "");
+        RecommendRecipesResponse cached = recipeRecommendCache.getIfPresent(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         String prompt = """
                 根据饮食偏好「%s」%s，推荐 3 道可在家做的家常菜。
                 严格只输出 JSON，不要其他文字：
@@ -333,7 +347,9 @@ public class AiChatService {
                 raw = formatRecipeReply(items);
             }
         }
-        return new RecommendRecipesResponse(request.getConversationId(), items, raw);
+        RecommendRecipesResponse response = new RecommendRecipesResponse(request.getConversationId(), items, raw);
+        recipeRecommendCache.put(cacheKey, response);
+        return response;
     }
 
     public SuggestOptionsResponse suggestOptions(SuggestOptionsRequest request) {
