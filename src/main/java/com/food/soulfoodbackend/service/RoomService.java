@@ -19,7 +19,9 @@ import com.food.soulfoodbackend.mapper.SfRoomMapper;
 import com.food.soulfoodbackend.mapper.SfRoomOptionMapper;
 import com.food.soulfoodbackend.mapper.SfUserMapper;
 import com.food.soulfoodbackend.mapper.SfVoteMapper;
+import com.food.soulfoodbackend.room.ws.RoomUpdatedEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,7 @@ public class RoomService {
     private final SfUserMapper userMapper;
     private final FriendService friendService;
     private final ActivityRecordService activityRecordService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public CreateRoomResponse createRoom(Long ownerId, CreateRoomRequest request) {
@@ -162,6 +165,7 @@ public class RoomService {
         int order = listOptions(room.getId()).size();
         SfRoomOption option = insertOption(room.getId(), request.getTitle().trim(),
                 request.getSource() != null ? request.getSource() : "manual", order);
+        publishRoomUpdated(code);
         return new RoomOptionDto(option.getId(), option.getTitle(), 0, 0, option.getSource());
     }
 
@@ -203,7 +207,9 @@ public class RoomService {
         optionMapper.updateById(target);
 
         activityRecordService.recordVote(userId, room.getCode(), target.getTitle());
-        return getRoomDetail(code, userId);
+        RoomDetailResponse detail = getRoomDetail(code, userId);
+        publishRoomUpdated(code);
+        return detail;
     }
 
     @Transactional
@@ -317,6 +323,8 @@ public class RoomService {
             activityRecordService.recordRoomResult(recordUserId, room.getCode(), winner.getTitle());
         }
 
+        publishRoomUpdated(room.getCode());
+
         int total = options.stream().mapToInt(o -> o.getVoteCount() == null ? 0 : o.getVoteCount()).sum();
         int percent = total == 0 ? 0 : (int) Math.round(winner.getVoteCount() * 100.0 / total);
         return new RoomResultResponse(winner.getId(), winner.getTitle(), winner.getVoteCount(), percent);
@@ -374,5 +382,9 @@ public class RoomService {
             }
         }
         throw new BusinessException(ErrorCode.INTERNAL, "生成房间号失败");
+    }
+
+    private void publishRoomUpdated(String roomCode) {
+        eventPublisher.publishEvent(new RoomUpdatedEvent(roomCode));
     }
 }

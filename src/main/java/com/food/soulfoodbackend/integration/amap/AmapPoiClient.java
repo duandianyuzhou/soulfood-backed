@@ -125,7 +125,18 @@ public class AmapPoiClient {
                 coordinates[0],
                 coordinates[1],
                 distanceKm,
-                parseRating(poi.path("biz_ext").path("rating")));
+                parseRating(poi.path("biz_ext").path("rating")),
+                poi.path("tel").asText(null),
+                parsePhotoUrl(poi));
+    }
+
+    private String parsePhotoUrl(JsonNode poi) {
+        JsonNode photos = poi.path("photos");
+        if (!photos.isArray() || photos.isEmpty()) {
+            return null;
+        }
+        String url = photos.get(0).path("url").asText(null);
+        return StringUtils.hasText(url) ? url : null;
     }
 
     private BigDecimal parseRating(JsonNode ratingNode) {

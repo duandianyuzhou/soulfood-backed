@@ -10,5 +10,7 @@ public record AmapPoi(
         BigDecimal lng,
         BigDecimal lat,
         BigDecimal distanceKm,
-        BigDecimal rating) {
+        BigDecimal rating,
+        String phone,
+        String photoUrl) {
 }

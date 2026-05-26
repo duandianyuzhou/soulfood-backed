@@ -16,4 +16,5 @@ public class OrderItemDto {
     private String itemSummary;
     private String timeText;
     private String statusText;
+    private String source;
 }

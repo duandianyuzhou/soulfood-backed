@@ -22,6 +22,8 @@ public class SfOrder {
     private String itemSummary;
     private OffsetDateTime orderedAt;
     private OffsetDateTime createdAt;
+    /** manual 用户记账 / demo 示例数据 */
+    private String source;
     @TableLogic
     private Boolean deleted;
 }

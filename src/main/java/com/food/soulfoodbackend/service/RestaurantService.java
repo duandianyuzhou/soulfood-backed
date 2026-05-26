@@ -108,6 +108,8 @@ public class RestaurantService {
         row.setLat(poi.lat());
         row.setDistanceKm(poi.distanceKm());
         row.setRating(poi.rating());
+        row.setPhone(poi.phone());
+        row.setPhotoUrl(poi.photoUrl());
         row.setUpdatedAt(now);
         if (row.getId() == null) {
             restaurantMapper.insert(row);
@@ -149,6 +151,10 @@ public class RestaurantService {
                 restaurant.getRating(),
                 restaurant.getDistanceKm(),
                 restaurant.getAddress(),
+                restaurant.getLat(),
+                restaurant.getLng(),
+                restaurant.getPhone(),
+                restaurant.getPhotoUrl(),
                 wanted,
                 favorited);
     }

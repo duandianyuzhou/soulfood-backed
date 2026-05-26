@@ -6,11 +6,13 @@ import com.food.soulfoodbackend.dto.auth.LoginResponse;
 import com.food.soulfoodbackend.dto.auth.MockLoginRequest;
 import com.food.soulfoodbackend.dto.auth.PasswordLoginRequest;
 import com.food.soulfoodbackend.dto.auth.RegisterRequest;
+import com.food.soulfoodbackend.dto.auth.UpdateProfileRequest;
 import com.food.soulfoodbackend.dto.auth.UserProfileResponse;
 import com.food.soulfoodbackend.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,5 +44,10 @@ public class AuthController {
     @GetMapping("/me")
     public ApiResult<UserProfileResponse> me() {
         return ApiResult.ok(authService.getProfile(UserContext.requireUserId()));
+    }
+
+    @PatchMapping("/me")
+    public ApiResult<UserProfileResponse> updateMe(@Valid @RequestBody UpdateProfileRequest request) {
+        return ApiResult.ok(authService.updateProfile(UserContext.requireUserId(), request));
     }
 }

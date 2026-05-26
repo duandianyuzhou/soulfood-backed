@@ -2,12 +2,14 @@ package com.food.soulfoodbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.domain.entity.SfOrder;
+import com.food.soulfoodbackend.dto.order.CreateOrderRequest;
 import com.food.soulfoodbackend.dto.order.OrderDayGroupDto;
 import com.food.soulfoodbackend.dto.order.OrderItemDto;
 import com.food.soulfoodbackend.dto.order.OrdersOverviewResponse;
 import com.food.soulfoodbackend.mapper.SfOrderMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -43,6 +45,8 @@ public class OrderService {
             rows = orderMapper.selectList(wrapper);
         }
 
+        boolean hasDemoOrders = rows.stream().anyMatch(r -> "demo".equals(r.getSource()));
+
         BigDecimal total = rows.stream()
                 .map(SfOrder::getAmount)
                 .filter(a -> a != null)
@@ -70,7 +74,25 @@ public class OrderService {
             days.add(new OrderDayGroupDto(dateLabel, dayCategory, orderItems));
         });
 
-        return new OrdersOverviewResponse(rows.size(), total, topCategory, days);
+        return new OrdersOverviewResponse(rows.size(), total, topCategory, days, hasDemoOrders);
+    }
+
+    @Transactional
+    public OrderItemDto createManualOrder(Long userId, CreateOrderRequest request) {
+        SfOrder row = new SfOrder();
+        row.setUserId(userId);
+        row.setRestaurantName(request.getRestaurantName().trim());
+        row.setCategory(request.getCategory() != null && !request.getCategory().isBlank()
+                ? request.getCategory().trim()
+                : "food");
+        row.setAmount(request.getAmount());
+        row.setItemSummary(request.getItemSummary());
+        row.setOrderedAt(OffsetDateTime.now());
+        row.setCreatedAt(OffsetDateTime.now());
+        row.setSource("manual");
+        row.setDeleted(false);
+        orderMapper.insert(row);
+        return toItem(row);
     }
 
     private OrderItemDto toItem(SfOrder row) {
@@ -87,7 +109,8 @@ public class OrderService {
                 row.getAmount(),
                 row.getItemSummary(),
                 row.getOrderedAt() == null ? "" : TIME_TEXT.format(row.getOrderedAt()),
-                status);
+                status,
+                row.getSource() == null ? "manual" : row.getSource());
     }
 
     private void seedDemoOrders(Long userId) {
@@ -97,14 +120,15 @@ public class OrderService {
         }
         OffsetDateTime now = OffsetDateTime.now();
         insertDemo(userId, "海底捞（万象城店）", "food", new BigDecimal("168.00"),
-                "2人 · 18:42 · 线下堂食", now.minusDays(15));
+                "2人 · 18:42 · 线下堂食", now.minusDays(15), "demo");
         insertDemo(userId, "喜茶（万象城店）", "drink", new BigDecimal("38.00"),
-                "2杯 · 15:20 · 外带 · 已评价", now.minusDays(17));
+                "2杯 · 15:20 · 外带 · 已评价", now.minusDays(17), "demo");
         insertDemo(userId, "麦当劳（万象城店）", "fast", new BigDecimal("46.00"),
-                "1人 · 12:05 · 自取 · 待开发票", now.minusDays(19));
+                "1人 · 12:05 · 自取 · 待开发票", now.minusDays(19), "demo");
     }
 
-    private void insertDemo(Long userId, String name, String category, BigDecimal amount, String summary, OffsetDateTime orderedAt) {
+    private void insertDemo(Long userId, String name, String category, BigDecimal amount,
+                            String summary, OffsetDateTime orderedAt, String source) {
         SfOrder row = new SfOrder();
         row.setUserId(userId);
         row.setRestaurantName(name);
@@ -112,6 +136,7 @@ public class OrderService {
         row.setAmount(amount);
         row.setItemSummary(summary);
         row.setOrderedAt(orderedAt);
+        row.setSource(source);
         row.setCreatedAt(OffsetDateTime.now());
         row.setDeleted(false);
         orderMapper.insert(row);

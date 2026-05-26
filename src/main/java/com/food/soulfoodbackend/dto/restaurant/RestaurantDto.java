@@ -15,6 +15,10 @@ public class RestaurantDto {
     private BigDecimal rating;
     private BigDecimal distanceKm;
     private String address;
+    private BigDecimal lat;
+    private BigDecimal lng;
+    private String phone;
+    private String photoUrl;
     private boolean wanted;
     private boolean favorited;
 }

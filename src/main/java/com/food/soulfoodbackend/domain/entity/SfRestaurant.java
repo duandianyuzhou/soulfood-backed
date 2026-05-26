@@ -23,6 +23,8 @@ public class SfRestaurant {
     private BigDecimal rating;
     private BigDecimal distanceKm;
     private String externalId;
+    private String phone;
+    private String photoUrl;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
     @TableLogic

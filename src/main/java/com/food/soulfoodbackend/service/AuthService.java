@@ -8,6 +8,7 @@ import com.food.soulfoodbackend.dto.auth.LoginResponse;
 import com.food.soulfoodbackend.dto.auth.MockLoginRequest;
 import com.food.soulfoodbackend.dto.auth.PasswordLoginRequest;
 import com.food.soulfoodbackend.dto.auth.RegisterRequest;
+import com.food.soulfoodbackend.dto.auth.UpdateProfileRequest;
 import com.food.soulfoodbackend.dto.auth.UserProfileResponse;
 import com.food.soulfoodbackend.mapper.SfUserMapper;
 import lombok.RequiredArgsConstructor;
@@ -84,6 +85,30 @@ public class AuthService {
         }
         return new UserProfileResponse(user.getId(), user.getUsername(), user.getNickname(),
                 user.getAvatarUrl(), user.getSignature());
+    }
+
+    @Transactional
+    public UserProfileResponse updateProfile(Long userId, UpdateProfileRequest request) {
+        SfUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "用户不存在");
+        }
+        if (request.getNickname() != null) {
+            String nickname = request.getNickname().trim();
+            if (nickname.isEmpty()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "昵称不能为空");
+            }
+            user.setNickname(nickname);
+        }
+        if (request.getAvatarUrl() != null) {
+            user.setAvatarUrl(request.getAvatarUrl().trim().isEmpty() ? null : request.getAvatarUrl().trim());
+        }
+        if (request.getSignature() != null) {
+            user.setSignature(request.getSignature().trim().isEmpty() ? null : request.getSignature().trim());
+        }
+        user.setUpdatedAt(OffsetDateTime.now());
+        userMapper.updateById(user);
+        return getProfile(userId);
     }
 
     private SfUser createUser(String openId, String username, String passwordHash, String nickname) {
