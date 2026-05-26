@@ -32,6 +32,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Base64;
+import java.util.ArrayList;
 
 import java.util.HashMap;
 import java.util.List;
@@ -227,14 +228,23 @@ public class AiChatService {
         return bytes;
     }
 
-    public List<ChatHistoryMessageDto> getHistoryMessages(String conversationId, Long userId) {
+    public List<ChatHistoryMessageDto> getHistoryMessages(
+            String conversationId,
+            Long userId,
+            Integer offset,
+            Integer limit) {
         conversationService.assertOwnedByUser(conversationId, userId);
+        int safeOffset = offset == null ? 0 : Math.max(0, offset);
+        int safeLimit = limit == null ? 10 : Math.max(1, Math.min(limit, 50));
         List<SfAiChatMessage> rows = messageMapper.selectList(new LambdaQueryWrapper<SfAiChatMessage>()
                 .eq(SfAiChatMessage::getConversationId, conversationId)
                 .in(SfAiChatMessage::getMessageType, "USER", "ASSISTANT")
-                .orderByAsc(SfAiChatMessage::getSortOrder)
-                .orderByAsc(SfAiChatMessage::getId));
-        return rows.stream().map(this::toHistoryDto).toList();
+                .orderByDesc(SfAiChatMessage::getSortOrder)
+                .orderByDesc(SfAiChatMessage::getId)
+                .last("LIMIT " + safeLimit + " OFFSET " + safeOffset));
+        List<SfAiChatMessage> ascRows = new ArrayList<>(rows);
+        java.util.Collections.reverse(ascRows);
+        return ascRows.stream().map(this::toHistoryDto).toList();
     }
 
     private ChatHistoryMessageDto toHistoryDto(SfAiChatMessage row) {

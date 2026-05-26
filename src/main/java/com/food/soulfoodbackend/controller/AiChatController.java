@@ -87,8 +87,15 @@ public class AiChatController {
     }
 
     @GetMapping("/chat/{conversationId}/history")
-    public ApiResult<List<ChatHistoryMessageDto>> history(@PathVariable String conversationId) {
-        return ApiResult.ok(aiChatService.getHistoryMessages(conversationId, UserContext.getUserId()));
+    public ApiResult<List<ChatHistoryMessageDto>> history(
+            @PathVariable String conversationId,
+            @RequestParam(defaultValue = "0") Integer offset,
+            @RequestParam(defaultValue = "10") Integer limit) {
+        return ApiResult.ok(aiChatService.getHistoryMessages(
+                conversationId,
+                UserContext.getUserId(),
+                offset,
+                limit));
     }
 
     @GetMapping("/conversations")
