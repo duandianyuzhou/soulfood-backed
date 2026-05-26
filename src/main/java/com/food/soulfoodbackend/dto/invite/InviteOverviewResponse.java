@@ -12,5 +12,6 @@ public class InviteOverviewResponse {
     private String inviteCode;
     private int completedCount;
     private int targetCount;
+    private boolean badgeUnlocked;
     private List<InviteRecordDto> records;
 }

@@ -5,11 +5,8 @@ import lombok.Data;
 
 @Data
 @AllArgsConstructor
-public class LoginResponse {
+public class TokenRefreshResponse {
 
-    private Long userId;
     private String token;
     private String refreshToken;
-    private String nickname;
-    private String avatarUrl;
 }

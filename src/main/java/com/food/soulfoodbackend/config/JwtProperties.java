@@ -14,4 +14,7 @@ public class JwtProperties {
 
     /** Access Token 有效期（小时） */
     private int accessTokenExpireHours = 168;
+
+    /** Refresh Token 有效期（小时） */
+    private int refreshTokenExpireHours = 720;
 }

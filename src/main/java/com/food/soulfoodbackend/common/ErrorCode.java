@@ -12,6 +12,7 @@ public enum ErrorCode {
     NOT_FOUND(404, "资源不存在"),
     FORBIDDEN(403, "无权访问"),
     CONFLICT(409, "操作冲突"),
+    TOO_MANY_REQUESTS(429, "请求过于频繁"),
     INTERNAL(500, "服务器错误");
 
     private final int code;

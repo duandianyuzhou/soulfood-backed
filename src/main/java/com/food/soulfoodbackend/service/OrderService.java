@@ -3,6 +3,7 @@ package com.food.soulfoodbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.domain.entity.SfOrder;
 import com.food.soulfoodbackend.dto.order.CreateOrderRequest;
+import com.food.soulfoodbackend.dto.order.CreateVoteOrderRequest;
 import com.food.soulfoodbackend.dto.order.OrderDayGroupDto;
 import com.food.soulfoodbackend.dto.order.OrderItemDto;
 import com.food.soulfoodbackend.dto.order.OrdersOverviewResponse;
@@ -86,6 +87,26 @@ public class OrderService {
         row.setOrderedAt(OffsetDateTime.now());
         row.setCreatedAt(OffsetDateTime.now());
         row.setSource("manual");
+        row.setDeleted(false);
+        orderMapper.insert(row);
+        return toItem(row);
+    }
+
+    @Transactional
+    public OrderItemDto createVoteOrder(Long userId, CreateVoteOrderRequest request) {
+        SfOrder row = new SfOrder();
+        row.setUserId(userId);
+        row.setRestaurantName(request.getWinnerTitle().trim());
+        row.setCategory("food");
+        row.setAmount(request.getAmount());
+        String summary = "投票胜出记账";
+        if (request.getRoomCode() != null && !request.getRoomCode().isBlank()) {
+            summary += " · 房间 " + request.getRoomCode().trim();
+        }
+        row.setItemSummary(summary);
+        row.setOrderedAt(OffsetDateTime.now());
+        row.setCreatedAt(OffsetDateTime.now());
+        row.setSource("vote");
         row.setDeleted(false);
         orderMapper.insert(row);
         return toItem(row);

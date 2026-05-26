@@ -58,7 +58,15 @@ public class InviteService {
                     done ? "已加入小队" : "待完成注册"));
         }
 
-        return new InviteOverviewResponse(user.getInviteCode(), completed, TARGET_COUNT, records);
+        return new InviteOverviewResponse(
+                user.getInviteCode(), completed, TARGET_COUNT, completed >= TARGET_COUNT, records);
+    }
+
+    public boolean isBadgeUnlocked(Long userId) {
+        long completed = inviteMapper.selectCount(new LambdaQueryWrapper<SfInvite>()
+                .eq(SfInvite::getInviterId, userId)
+                .eq(SfInvite::getStatus, "completed"));
+        return completed >= TARGET_COUNT;
     }
 
     @Transactional

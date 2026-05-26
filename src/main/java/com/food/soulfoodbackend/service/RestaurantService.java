@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -88,6 +89,31 @@ public class RestaurantService {
         want.setCreatedAt(OffsetDateTime.now());
         restaurantWantMapper.insert(want);
         activityRecordService.recordWantRestaurant(userId, restaurant.getName());
+    }
+
+    public List<RestaurantDto> listWanted(Long userId) {
+        List<SfRestaurantWant> wants = restaurantWantMapper.selectList(new LambdaQueryWrapper<SfRestaurantWant>()
+                .eq(SfRestaurantWant::getUserId, userId)
+                .orderByDesc(SfRestaurantWant::getCreatedAt));
+        if (wants.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> favoritedIds = loadFavoritedIds(userId);
+        List<RestaurantDto> result = new ArrayList<>();
+        for (SfRestaurantWant want : wants) {
+            SfRestaurant restaurant = restaurantMapper.selectById(want.getRestaurantId());
+            if (restaurant != null) {
+                result.add(toDto(restaurant, true, favoritedIds.contains(restaurant.getId())));
+            }
+        }
+        return result;
+    }
+
+    @Transactional
+    public void removeWant(Long userId, Long restaurantId) {
+        restaurantWantMapper.delete(new LambdaQueryWrapper<SfRestaurantWant>()
+                .eq(SfRestaurantWant::getUserId, userId)
+                .eq(SfRestaurantWant::getRestaurantId, restaurantId));
     }
 
     private SfRestaurant upsertFromAmap(AmapPoi poi) {

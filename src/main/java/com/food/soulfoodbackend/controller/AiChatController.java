@@ -14,6 +14,7 @@ import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import com.food.soulfoodbackend.dto.ai.UpdateConversationRequest;
 import com.food.soulfoodbackend.service.AiChatService;
+import com.food.soulfoodbackend.service.AiRateLimitService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,13 +36,20 @@ import java.util.Map;
 public class AiChatController {
 
     private final AiChatService aiChatService;
+    private final AiRateLimitService aiRateLimitService;
 
-    public AiChatController(AiChatService aiChatService) {
+    public AiChatController(AiChatService aiChatService, AiRateLimitService aiRateLimitService) {
         this.aiChatService = aiChatService;
+        this.aiRateLimitService = aiRateLimitService;
+    }
+
+    private void checkAiRateLimit() {
+        aiRateLimitService.checkAllowed(UserContext.getUserId());
     }
 
     @PostMapping("/chat")
     public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) {
+        checkAiRateLimit();
         String conversationId = aiChatService.resolveConversationId(request.conversationId());
         ChatResponse response = aiChatService.chat(
                 conversationId,
@@ -56,6 +64,7 @@ public class AiChatController {
 
     @PostMapping(value = "/chat/stream", produces = "application/x-ndjson;charset=UTF-8")
     public Flux<String> chatStreamPost(@RequestBody ChatRequest request) {
+        checkAiRateLimit();
         String resolvedId = aiChatService.resolveConversationId(request.conversationId());
         return aiChatService.chatStreamNdjson(
                 resolvedId,
@@ -109,21 +118,25 @@ public class AiChatController {
 
     @GetMapping("/recommend")
     public ApiResult<ChatResponse> recommend(@RequestParam(defaultValue = "清淡、少油、适合晚餐") String preference) {
+        checkAiRateLimit();
         return ApiResult.ok(new ChatResponse(null, aiChatService.recommend(preference), List.of()));
     }
 
     @PostMapping("/recommend/recipes")
     public ApiResult<RecommendRecipesResponse> recommendRecipes(@RequestBody RecommendRecipesRequest request) {
+        checkAiRateLimit();
         return ApiResult.ok(aiChatService.recommendRecipes(request));
     }
 
     @PostMapping("/suggest-options")
     public ApiResult<SuggestOptionsResponse> suggestOptions(@Valid @RequestBody SuggestOptionsRequest request) {
+        checkAiRateLimit();
         return ApiResult.ok(aiChatService.suggestOptions(request));
     }
 
     @PostMapping("/random-pick")
     public ApiResult<RandomPickResponse> randomPick(@Valid @RequestBody RandomPickRequest request) {
+        checkAiRateLimit();
         return ApiResult.ok(aiChatService.randomPick(request));
     }
 }

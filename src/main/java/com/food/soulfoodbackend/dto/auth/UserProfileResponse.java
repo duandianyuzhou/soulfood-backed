@@ -12,4 +12,6 @@ public class UserProfileResponse {
     private String nickname;
     private String avatarUrl;
     private String signature;
+    private String phone;
+    private boolean inviteBadgeUnlocked;
 }

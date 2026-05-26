@@ -3,6 +3,7 @@ package com.food.soulfoodbackend.controller;
 import com.food.soulfoodbackend.common.ApiResult;
 import com.food.soulfoodbackend.common.UserContext;
 import com.food.soulfoodbackend.dto.order.CreateOrderRequest;
+import com.food.soulfoodbackend.dto.order.CreateVoteOrderRequest;
 import com.food.soulfoodbackend.dto.order.OrderItemDto;
 import com.food.soulfoodbackend.dto.order.OrdersOverviewResponse;
 import com.food.soulfoodbackend.service.OrderService;
@@ -30,5 +31,10 @@ public class OrderController {
     @PostMapping
     public ApiResult<OrderItemDto> create(@Valid @RequestBody CreateOrderRequest request) {
         return ApiResult.ok(orderService.createManualOrder(UserContext.requireUserId(), request));
+    }
+
+    @PostMapping("/from-vote")
+    public ApiResult<OrderItemDto> createFromVote(@Valid @RequestBody CreateVoteOrderRequest request) {
+        return ApiResult.ok(orderService.createVoteOrder(UserContext.requireUserId(), request));
     }
 }
