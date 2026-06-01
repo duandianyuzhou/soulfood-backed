@@ -2,6 +2,7 @@ package com.food.soulfoodbackend.service;
 
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.food.soulfoodbackend.tools.OrderTools;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -59,6 +60,7 @@ public class AiChatService {
     private final ObjectMapper objectMapper;
     private final AiMemoryExtractionService memoryExtractionService;
     private final Cache<String, RecommendRecipesResponse> recipeRecommendCache;
+    private final OrderTools orderTools;
 
     @Value("${app.ai.vision-model:glm-4v-flash}")
     private String visionModel;
@@ -73,7 +75,8 @@ public class AiChatService {
             AiChatMessageMetaService messageMetaService,
             SfAiChatMessageMapper messageMapper,
             ObjectMapper objectMapper,
-            AiMemoryExtractionService memoryExtractionService) {
+            AiMemoryExtractionService memoryExtractionService,
+            OrderTools orderTools) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
@@ -88,6 +91,7 @@ public class AiChatService {
                 .maximumSize(500)
                 .expireAfterWrite(Duration.ofMinutes(3))
                 .build();
+        this.orderTools = orderTools;
     }
 
     public String resolveConversationId(String conversationId) {
@@ -362,7 +366,9 @@ public class AiChatService {
                 已有选项：%s
                 每行只写一个选项名称，不要编号和解释。
                 """.formatted(topic, existing);
-        String raw = safeCall(() -> statelessChatClient.prompt().user(prompt).call().content(), "寿司\n麻辣烫\n黄焖鸡");
+        String raw = safeCall(() -> statelessChatClient.prompt().user(prompt)
+                .tools(orderTools)
+                .call().content(), "寿司\n麻辣烫\n黄焖鸡");
         List<String> options = AiResponseParser.parseOptions(raw);
         if (options.isEmpty()) {
             options = List.of("寿司", "麻辣烫", "黄焖鸡");
