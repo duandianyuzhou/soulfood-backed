@@ -1,11 +1,10 @@
 package com.food.soulfoodbackend.ai.rag;
 
 import com.food.soulfoodbackend.config.AiRagProperties;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.openai.OpenAiEmbeddingOptions;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -13,14 +12,23 @@ import java.util.List;
 import java.util.Locale;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class EmbeddingClient {
 
     private static final int BATCH = 32;
 
-    private final EmbeddingModel embeddingModel;
+    private final ObjectProvider<EmbeddingModel> embeddingModel;
     private final AiRagProperties properties;
+
+    public EmbeddingClient(ObjectProvider<EmbeddingModel> embeddingModel, AiRagProperties properties) {
+        this.embeddingModel = embeddingModel;
+        this.properties = properties;
+    }
+
+    public boolean isEnabled() {
+        String mode = mode();
+        return "embedding".equals(mode) || "auto".equals(mode);
+    }
 
     public float[] embed(String text) {
         List<float[]> all = embedAll(List.of(text));
@@ -28,13 +36,17 @@ public class EmbeddingClient {
     }
 
     public List<float[]> embedAll(List<String> texts) {
+        EmbeddingModel model = embeddingModel.getIfAvailable();
+        if (model == null) {
+            throw new IllegalStateException("未配置 EmbeddingModel（请确认 Ollama embedding 已启用）");
+        }
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
         List<float[]> out = new ArrayList<>(texts.size());
         for (int i = 0; i < texts.size(); i += BATCH) {
             List<String> batch = texts.subList(i, Math.min(i + BATCH, texts.size()));
-            var response = embeddingModel.call(new EmbeddingRequest(batch, options()));
+            var response = model.call(new EmbeddingRequest(batch, null));
             if (response.getResults().size() != batch.size()) {
                 throw new IllegalStateException("embedding 条数与输入不一致");
             }
@@ -61,11 +73,9 @@ public class EmbeddingClient {
         return sb.toString();
     }
 
-    private OpenAiEmbeddingOptions options() {
-        return OpenAiEmbeddingOptions.builder()
-                .model(properties.getEmbeddingModel())
-                .dimensions(properties.getEmbeddingDims())
-                .build();
+    private String mode() {
+        String mode = properties.getRag().getMode();
+        return mode == null ? "lexical" : mode.trim().toLowerCase(Locale.ROOT);
     }
 
     private void assertDims(float[] vector) {
@@ -73,7 +83,7 @@ public class EmbeddingClient {
         if (vector == null || vector.length != expected) {
             throw new IllegalStateException(String.format(
                     Locale.ROOT,
-                    "embedding 维度为 %s，配置/DDL 为 %d，禁止写入",
+                    "embedding 维度为 %s，配置/DDL 为 %d。Ollama qwen3-embedding:0.6b 应为 1024",
                     vector == null ? "null" : vector.length,
                     expected));
         }

@@ -64,30 +64,47 @@ public class RagIngestService {
         if (docs.isEmpty()) {
             return 0;
         }
+        boolean useVector = embeddingClient.isEnabled();
+        if (!useVector) {
+            log.info("RAG ingest 使用关键词模式，跳过 embedding 计算");
+        }
         Map<String, SfRagChunk> existing = chunkMapper.selectList(new LambdaQueryWrapper<SfRagChunk>()
                         .in(SfRagChunk::getSourceKey, docs.stream().map(RagDocument::sourceKey).toList()))
                 .stream()
                 .collect(Collectors.toMap(SfRagChunk::getSourceKey, Function.identity(), (a, b) -> a));
+        java.util.Set<String> missingEmbedding = useVector
+                ? new java.util.HashSet<>(java.util.Objects.requireNonNullElse(
+                        chunkMapper.listKeysMissingEmbedding(), List.of()))
+                : java.util.Set.of();
 
         List<RagDocument> changed = docs.stream()
                 .filter(doc -> {
                     SfRagChunk row = existing.get(doc.sourceKey());
-                    return row == null || !Objects.equals(row.getContent(), doc.content());
+                    if (row == null || !Objects.equals(row.getContent(), doc.content())) {
+                        return true;
+                    }
+                    return missingEmbedding.contains(doc.sourceKey());
                 })
                 .toList();
         if (changed.isEmpty()) {
             return 0;
         }
-        List<float[]> vectors = embeddingClient.embedAll(changed.stream().map(RagDocument::content).toList());
+        List<float[]> vectors = useVector
+                ? embeddingClient.embedAll(changed.stream().map(RagDocument::content).toList())
+                : List.of();
         for (int i = 0; i < changed.size(); i++) {
             RagDocument doc = changed.get(i);
+            String embedding = null;
+            if (useVector) {
+                embedding = embeddingClient.toPgVector(vectors.get(i));
+            }
             chunkMapper.upsert(
                     doc.sourceType(),
                     doc.sourceId(),
                     doc.sourceKey(),
                     doc.title(),
                     doc.content(),
-                    embeddingClient.toPgVector(vectors.get(i)));
+                    embedding);
         }
         return changed.size();
     }

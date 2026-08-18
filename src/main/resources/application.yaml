@@ -38,13 +38,21 @@ spring:
       chat:
         completions-path: /chat/completions
         options:
-          model: glm-4-flash
+          model: glm-4.7-flash
+          temperature: 0.7
+    ollama:
+      base-url: http://127.0.0.1:11434
+      init:
+        pull-model-strategy: never
+      chat:
+        options:
+          model: qwen3.5:2b
           temperature: 0.7
       embedding:
-        embeddings-path: /embeddings
         options:
-          model: embedding-3
-          dimensions: 1024
+          model: qwen3-embedding:0.6b
+    model:
+      embedding: ollama
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -68,8 +76,9 @@ app:
   ai:
     vision-model: glm-4v-flash
     memory-extraction-enabled: true
-    embedding-model: embedding-3
+    embedding-model: qwen3-embedding:0.6b
     embedding-dims: 1024
     rag:
+      mode: embedding
       ingest-on-startup: true
       top-k: 5

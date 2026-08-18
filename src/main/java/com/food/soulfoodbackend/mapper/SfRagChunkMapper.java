@@ -19,7 +19,7 @@ public interface SfRagChunkMapper extends BaseMapper<SfRagChunk> {
                 source_id = EXCLUDED.source_id,
                 title = EXCLUDED.title,
                 content = EXCLUDED.content,
-                embedding = EXCLUDED.embedding
+                embedding = COALESCE(EXCLUDED.embedding, sf_rag_chunk.embedding)
             """)
     int upsert(
             @Param("sourceType") String sourceType,
@@ -33,8 +33,12 @@ public interface SfRagChunkMapper extends BaseMapper<SfRagChunk> {
             SELECT id, source_type AS sourceType, source_id AS sourceId, source_key AS sourceKey,
                    title, content, (embedding <=> CAST(#{embedding} AS public.vector)) AS distance
             FROM sf_rag_chunk
+            WHERE embedding IS NOT NULL
             ORDER BY embedding <=> CAST(#{embedding} AS public.vector)
             LIMIT #{limit}
             """)
     List<RagHit> searchNearest(@Param("embedding") String embedding, @Param("limit") int limit);
+
+    @Select("SELECT source_key FROM sf_rag_chunk WHERE embedding IS NULL")
+    List<String> listKeysMissingEmbedding();
 }

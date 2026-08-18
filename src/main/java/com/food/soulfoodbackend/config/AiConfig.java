@@ -1,12 +1,13 @@
 package com.food.soulfoodbackend.config;
 
-import com.food.soulfoodbackend.service.AiChatTools;
 import com.food.soulfoodbackend.chat.PgChatMemoryRepository;
+import com.food.soulfoodbackend.service.AiChatTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
-import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -26,21 +27,30 @@ public class AiConfig {
                 .build();
     }
 
+    /** 复杂 ReAct：智谱 GLM + 工具 */
     @Bean
-    public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory, AiChatTools aiChatTools) {
-        return ChatClient.builder(chatModel)
+    public ChatClient chatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory, AiChatTools aiChatTools) {
+        return ChatClient.builder(openAiChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultTools(aiChatTools)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 
-    /** 无会话记忆，用于菜谱推荐、随机选店等一次性调用 */
+    /** 简单闲聊：本地 Ollama + 会话记忆，不带工具 */
     @Bean
-    public ChatClient statelessChatClient(ChatModel chatModel) {
-        return ChatClient.builder(chatModel)
+    public ChatClient simpleChatClient(OllamaChatModel ollamaChatModel, ChatMemory chatMemory) {
+        return ChatClient.builder(ollamaChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 
+    /** 一次性调用：本地 Ollama，无记忆 */
+    @Bean
+    public ChatClient statelessChatClient(OllamaChatModel ollamaChatModel) {
+        return ChatClient.builder(ollamaChatModel)
+                .defaultSystem(SYSTEM_PROMPT)
+                .build();
+    }
 }

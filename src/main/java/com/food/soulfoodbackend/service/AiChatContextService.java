@@ -8,6 +8,12 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AiChatContextService {
 
+    private static final String SIMPLE_INSTRUCTION = """
+            你是 DecideMeal 美食助手，擅长中餐推荐、菜谱讲解和饮食搭配。
+            回答要简洁实用，语气亲切。不要编造不存在的店名、房间号或本 App 功能。
+            如果用户要搜附近餐厅、创建投票或收藏，请提醒对方说明「附近」「组局」「收藏」等具体需求。
+            """;
+
     private static final String BASE_INSTRUCTION = """
             你是 DecideMeal 美食助手，擅长中餐推荐、菜谱讲解、探店建议和饮食搭配。
             回答要简洁实用，语气亲切，优先给出可操作的推荐。
@@ -27,7 +33,15 @@ public class AiChatContextService {
     private final AiUserMemoryService memoryService;
 
     public String buildSystemPrompt(Long userId, Double lat, Double lng) {
-        StringBuilder sb = new StringBuilder(BASE_INSTRUCTION);
+        return buildPrompt(BASE_INSTRUCTION, userId, lat, lng);
+    }
+
+    public String buildSimpleSystemPrompt(Long userId, Double lat, Double lng) {
+        return buildPrompt(SIMPLE_INSTRUCTION, userId, lat, lng);
+    }
+
+    private String buildPrompt(String instruction, Long userId, Double lat, Double lng) {
+        StringBuilder sb = new StringBuilder(instruction);
         sb.append("\n\n【用户上下文】");
         if (userId != null) {
             sb.append("\n- 口味偏好：").append(preferenceService.buildPreferenceText(userId));

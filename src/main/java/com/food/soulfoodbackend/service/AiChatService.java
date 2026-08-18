@@ -3,6 +3,7 @@ package com.food.soulfoodbackend.service;
 import com.food.soulfoodbackend.ai.rag.KnowledgeQueryDetector;
 import com.food.soulfoodbackend.ai.rag.RagHit;
 import com.food.soulfoodbackend.ai.rag.RagSearchService;
+import com.food.soulfoodbackend.ai.rag.ReactNeedDetector;
 import com.food.soulfoodbackend.ai.stream.ChatStreamEmitter;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -54,6 +55,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class AiChatService {
 
     private final ChatClient chatClient;
+    private final ChatClient simpleChatClient;
     private final ChatClient statelessChatClient;
     private final ChatMemory chatMemory;
     private final AiConversationService conversationService;
@@ -73,6 +75,7 @@ public class AiChatService {
 
     public AiChatService(
             @Qualifier("chatClient") ChatClient chatClient,
+            @Qualifier("simpleChatClient") ChatClient simpleChatClient,
             @Qualifier("statelessChatClient") ChatClient statelessChatClient,
             ChatMemory chatMemory,
             AiConversationService conversationService,
@@ -86,6 +89,7 @@ public class AiChatService {
             ChatStreamEmitter streamEmitter,
             OrderTools orderTools) {
         this.chatClient = chatClient;
+        this.simpleChatClient = simpleChatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
         this.conversationService = conversationService;
@@ -125,6 +129,9 @@ public class AiChatService {
         if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
             return chatWithRag(conversationId, userText, userId, lat, lng);
         }
+        if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
+            return chatSimple(conversationId, userText, userId, lat, lng);
+        }
         String systemPrompt = hasImage
                 ? contextService.buildVisionSystemPrompt(userId, lat, lng)
                 : contextService.buildSystemPrompt(userId, lat, lng);
@@ -162,6 +169,9 @@ public class AiChatService {
         boolean hasImage = hasImage(imageBase64);
         if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
             return chatStreamWithRag(conversationId, userText, userId, lat, lng);
+        }
+        if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
+            return chatStreamSimple(conversationId, userText, userId, lat, lng);
         }
         String systemPrompt = hasImage
                 ? contextService.buildVisionSystemPrompt(userId, lat, lng)
@@ -204,6 +214,52 @@ public class AiChatService {
         return chatStreamNdjson(conversationId, message, userId, null, null, null, null)
                 .filter(line -> line.contains("\"type\":\"chunk\""))
                 .map(line -> extractChunkText(line));
+    }
+
+    private ChatResponse chatSimple(String conversationId, String userText, Long userId, Double lat, Double lng) {
+        String systemPrompt = contextService.buildSimpleSystemPrompt(userId, lat, lng);
+        String reply = safeCall(() -> simpleChatClient.prompt()
+                .system(systemPrompt)
+                .user(userText)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .content(), "今天可以试试番茄炒蛋，简单又下饭。");
+        List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
+        messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+        memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
+        return new ChatResponse(conversationId, reply, cards);
+    }
+
+    private Flux<String> chatStreamSimple(String conversationId, String userText, Long userId, Double lat, Double lng) {
+        String systemPrompt = contextService.buildSimpleSystemPrompt(userId, lat, lng);
+        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+        Flux<String> chunks = simpleChatClient.prompt()
+                .system(systemPrompt)
+                .user(userText)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .stream()
+                .content()
+                .map(chunk -> {
+                    buffer.get().append(chunk);
+                    return streamEmitter.chunk(chunk);
+                })
+                .onErrorResume(ex -> {
+                    log.warn("local simple stream failed: {}", ex.getMessage());
+                    String fallback = "今天可以试试番茄炒蛋，简单又下饭。";
+                    buffer.get().append(fallback);
+                    return Flux.just(streamEmitter.chunk(fallback));
+                });
+        Mono<String> done = Mono.fromCallable(() -> {
+            String fullReply = buffer.get().toString();
+            if (fullReply.isBlank()) {
+                fullReply = "今天可以试试番茄炒蛋，简单又下饭。";
+            }
+            List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
+            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
+            return streamEmitter.done(conversationId, cards);
+        });
+        return chunks.concatWith(done.flux());
     }
 
     private ChatResponse chatWithRag(
@@ -476,7 +532,7 @@ public class AiChatService {
                 已有选项：%s
                 每行只写一个选项名称，不要编号和解释。
                 """.formatted(topic, existing);
-        String raw = safeCall(() -> statelessChatClient.prompt().user(prompt)
+        String raw = safeCall(() -> chatClient.prompt().user(prompt)
                 .tools(orderTools)
                 .call().content(), "寿司\n麻辣烫\n黄焖鸡");
         List<String> options = AiResponseParser.parseOptions(raw);

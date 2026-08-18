@@ -1,15 +1,20 @@
 package com.food.soulfoodbackend.ai.rag;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.config.AiRagProperties;
+import com.food.soulfoodbackend.domain.entity.SfRagChunk;
 import com.food.soulfoodbackend.mapper.SfRagChunkMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RagSearchService {
 
     private final EmbeddingClient embeddingClient;
@@ -25,8 +30,33 @@ public class RagSearchService {
             return List.of();
         }
         int topK = Math.max(1, Math.min(limit, 10));
+        String mode = mode();
+        if ("lexical".equals(mode)) {
+            return searchLexical(query, topK);
+        }
+        if ("embedding".equals(mode)) {
+            return searchVector(query, topK);
+        }
+        try {
+            List<RagHit> hits = searchVector(query, topK);
+            if (!hits.isEmpty()) {
+                return hits;
+            }
+        } catch (Exception ex) {
+            log.warn("向量检索失败，回退关键词: {}", ex.getMessage());
+        }
+        return searchLexical(query, topK);
+    }
+
+    private List<RagHit> searchVector(String query, int topK) {
         String vector = embeddingClient.toPgVector(embeddingClient.embed(query.trim()));
         return chunkMapper.searchNearest(vector, topK);
+    }
+
+    private List<RagHit> searchLexical(String query, int topK) {
+        List<SfRagChunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<SfRagChunk>()
+                .orderByAsc(SfRagChunk::getId));
+        return RagLexicalRanker.rank(query.trim(), chunks, topK);
     }
 
     public String formatForPrompt(List<RagHit> hits) {
@@ -46,6 +76,11 @@ public class RagSearchService {
                     .append("\n\n");
         }
         return sb.toString().trim();
+    }
+
+    private String mode() {
+        String mode = properties.getRag().getMode();
+        return mode == null ? "lexical" : mode.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String label(String sourceType) {
