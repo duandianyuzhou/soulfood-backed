@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS sf_rag_chunk (
     source_key  VARCHAR(64) NOT NULL,
     title       VARCHAR(128),
     content     TEXT NOT NULL,
-    embedding   public.vector(1024) NOT NULL,
+    embedding   vector(1024) NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uk_sf_rag_chunk_source_key UNIQUE (source_key),
     CONSTRAINT ck_sf_rag_chunk_source_type CHECK (source_type IN ('recipe', 'faq', 'common'))
