@@ -1,5 +1,9 @@
 package com.food.soulfoodbackend.service;
 
+import com.food.soulfoodbackend.ai.rag.KnowledgeQueryDetector;
+import com.food.soulfoodbackend.ai.rag.RagHit;
+import com.food.soulfoodbackend.ai.rag.RagSearchService;
+import com.food.soulfoodbackend.ai.stream.ChatStreamEmitter;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.tools.OrderTools;
@@ -22,6 +26,8 @@ import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.openai.OpenAiChatOptions;
@@ -39,9 +45,7 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.time.Duration;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -59,6 +63,8 @@ public class AiChatService {
     private final SfAiChatMessageMapper messageMapper;
     private final ObjectMapper objectMapper;
     private final AiMemoryExtractionService memoryExtractionService;
+    private final RagSearchService ragSearchService;
+    private final ChatStreamEmitter streamEmitter;
     private final Cache<String, RecommendRecipesResponse> recipeRecommendCache;
     private final OrderTools orderTools;
 
@@ -76,6 +82,8 @@ public class AiChatService {
             SfAiChatMessageMapper messageMapper,
             ObjectMapper objectMapper,
             AiMemoryExtractionService memoryExtractionService,
+            RagSearchService ragSearchService,
+            ChatStreamEmitter streamEmitter,
             OrderTools orderTools) {
         this.chatClient = chatClient;
         this.statelessChatClient = statelessChatClient;
@@ -87,6 +95,8 @@ public class AiChatService {
         this.messageMapper = messageMapper;
         this.objectMapper = objectMapper;
         this.memoryExtractionService = memoryExtractionService;
+        this.ragSearchService = ragSearchService;
+        this.streamEmitter = streamEmitter;
         this.recipeRecommendCache = Caffeine.newBuilder()
                 .maximumSize(500)
                 .expireAfterWrite(Duration.ofMinutes(3))
@@ -112,6 +122,9 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
+        if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
+            return chatWithRag(conversationId, userText, userId, lat, lng);
+        }
         String systemPrompt = hasImage
                 ? contextService.buildVisionSystemPrompt(userId, lat, lng)
                 : contextService.buildSystemPrompt(userId, lat, lng);
@@ -147,6 +160,9 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
+        if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
+            return chatStreamWithRag(conversationId, userText, userId, lat, lng);
+        }
         String systemPrompt = hasImage
                 ? contextService.buildVisionSystemPrompt(userId, lat, lng)
                 : contextService.buildSystemPrompt(userId, lat, lng);
@@ -165,7 +181,7 @@ public class AiChatService {
                 .content()
                 .map(chunk -> {
                     buffer.get().append(chunk);
-                    return toNdjson(Map.of("type", "chunk", "text", chunk));
+                    return streamEmitter.chunk(chunk);
                 });
 
         Mono<String> done = Mono.fromCallable(() -> {
@@ -174,11 +190,7 @@ public class AiChatService {
                 List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
                 messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
                 memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
-                Map<String, Object> payload = new HashMap<>();
-                payload.put("type", "done");
-                payload.put("conversationId", conversationId);
-                payload.put("cards", cards);
-                return toNdjson(payload);
+                return streamEmitter.done(conversationId, cards);
             } finally {
                 AiChatToolContextHolder.clear();
             }
@@ -192,6 +204,112 @@ public class AiChatService {
         return chatStreamNdjson(conversationId, message, userId, null, null, null, null)
                 .filter(line -> line.contains("\"type\":\"chunk\""))
                 .map(line -> extractChunkText(line));
+    }
+
+    private ChatResponse chatWithRag(
+            String conversationId,
+            String userText,
+            Long userId,
+            Double lat,
+            Double lng) {
+        List<RagHit> hits = safeSearch(userText);
+        String systemPrompt = buildRagSystemPrompt(userId, lat, lng, hits);
+        String reply = safeCall(() -> statelessChatClient.prompt()
+                .system(systemPrompt)
+                .user(userText)
+                .call()
+                .content(), "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。");
+        persistRagTurn(conversationId, userText, reply);
+        List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(reply, userId, lat, lng));
+        messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+        memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
+        return new ChatResponse(conversationId, reply, cards);
+    }
+
+    private Flux<String> chatStreamWithRag(
+            String conversationId,
+            String userText,
+            Long userId,
+            Double lat,
+            Double lng) {
+        String runId = "rag-" + conversationId;
+        List<RagHit> hits = safeSearch(userText);
+        String systemPrompt = buildRagSystemPrompt(userId, lat, lng, hits);
+        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+
+        Flux<String> preamble = Flux.just(
+                streamEmitter.workflow(runId, "知识检索", "running"),
+                streamEmitter.step(runId, "retrieve", "检索知识库", "running", null),
+                streamEmitter.step(
+                        runId,
+                        "retrieve",
+                        "检索知识库",
+                        "done",
+                        hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"));
+
+        Flux<String> chunks = statelessChatClient.prompt()
+                .system(systemPrompt)
+                .user(userText)
+                .stream()
+                .content()
+                .map(chunk -> {
+                    buffer.get().append(chunk);
+                    return streamEmitter.chunk(chunk);
+                })
+                .onErrorResume(ex -> {
+                    log.warn("RAG stream failed: {}", ex.getMessage());
+                    String fallback = "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。";
+                    buffer.get().append(fallback);
+                    return Flux.just(streamEmitter.chunk(fallback));
+                });
+
+        Mono<String> done = Mono.fromCallable(() -> {
+            String fullReply = buffer.get().toString();
+            if (fullReply.isBlank()) {
+                fullReply = "暂时没有检索到足够资料，你可以换个问法，或去菜谱库看看。";
+            }
+            persistRagTurn(conversationId, userText, fullReply);
+            List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(fullReply, userId, lat, lng));
+            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
+            return streamEmitter.done(conversationId, cards);
+        });
+
+        return preamble.concatWith(chunks).concatWith(done.flux());
+    }
+
+    private List<RagHit> safeSearch(String query) {
+        try {
+            return ragSearchService.search(query);
+        } catch (Exception ex) {
+            log.warn("RAG search failed: {}", ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private String buildRagSystemPrompt(Long userId, Double lat, Double lng, List<RagHit> hits) {
+        return contextService.buildSystemPrompt(userId, lat, lng) + """
+
+                【检索结果】来源可能是菜谱、产品 FAQ 或饮食常识，请按类型使用，不要把常识当成某道菜的步骤。
+                只根据下列资料回答；资料不足时明确说不确定，不要编造本 App 不存在的功能。
+                """ + ragSearchService.formatForPrompt(hits);
+    }
+
+    private void persistRagTurn(String conversationId, String userText, String reply) {
+        chatMemory.add(conversationId, List.of(new UserMessage(userText), new AssistantMessage(reply)));
+    }
+
+    private static List<ChatActionCardDto> mergeRagCards(List<RagHit> hits, List<ChatActionCardDto> fromText) {
+        List<ChatActionCardDto> cards = new ArrayList<>();
+        for (RagHit hit : hits) {
+            if ("recipe".equals(hit.getSourceType()) && hit.getSourceId() != null) {
+                cards.add(new ChatActionCardDto("recipe", hit.getSourceId(), hit.getTitle(), "知识库"));
+            }
+        }
+        if (fromText != null) {
+            cards.addAll(fromText);
+        }
+        return cards;
     }
 
     private void applyUser(
@@ -283,14 +401,6 @@ public class AiChatService {
     private void prepareConversation(String conversationId, Long userId, String message) {
         conversationService.ensureConversation(conversationId, userId);
         conversationService.setTitleIfBlank(conversationId, message);
-    }
-
-    private String toNdjson(Map<String, Object> payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException ex) {
-            return "{\"type\":\"error\",\"message\":\"序列化失败\"}";
-        }
     }
 
     private String extractChunkText(String line) {

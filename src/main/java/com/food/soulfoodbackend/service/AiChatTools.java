@@ -2,6 +2,8 @@ package com.food.soulfoodbackend.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.food.soulfoodbackend.ai.rag.RagHit;
+import com.food.soulfoodbackend.ai.rag.RagSearchService;
 import com.food.soulfoodbackend.dto.ai.ChatActionCardDto;
 import com.food.soulfoodbackend.dto.favorite.AddFavoriteRequest;
 import com.food.soulfoodbackend.dto.recipe.RecipeSummaryDto;
@@ -31,6 +33,7 @@ public class AiChatTools {
     private final RecipeService recipeService;
     private final RoomService roomService;
     private final FavoriteService favoriteService;
+    private final RagSearchService ragSearchService;
     private final ObjectMapper objectMapper;
 
     @Tool(description = "搜索用户附近的餐厅，返回真实店名、距离、评分。用户问附近吃什么、探店、找餐厅时优先调用。")
@@ -84,6 +87,37 @@ public class AiChatTools {
         } catch (Exception ex) {
             log.warn("searchRecipes failed: {}", ex.getMessage());
             return jsonError("搜索菜谱失败：" + ex.getMessage());
+        }
+    }
+
+    @Tool(description = "检索产品 FAQ、饮食常识和菜谱知识库。用户问怎么做某道菜、怎么加入房间、隔夜菜能不能吃等知识问题时优先调用。")
+    public String searchKnowledge(
+            @ToolParam(description = "用户问题或检索关键词") String query) {
+        if (!StringUtils.hasText(query)) {
+            return jsonError("检索词不能为空");
+        }
+        try {
+            List<RagHit> hits = ragSearchService.search(query);
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (RagHit hit : hits) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("sourceType", hit.getSourceType());
+                row.put("sourceKey", hit.getSourceKey());
+                row.put("title", hit.getTitle());
+                row.put("content", hit.getContent());
+                rows.add(row);
+                if ("recipe".equals(hit.getSourceType()) && hit.getSourceId() != null) {
+                    AiChatToolContextHolder.addCard(new ChatActionCardDto(
+                            "recipe",
+                            hit.getSourceId(),
+                            hit.getTitle(),
+                            "知识库"));
+                }
+            }
+            return json(Map.of("count", rows.size(), "items", rows));
+        } catch (Exception ex) {
+            log.warn("searchKnowledge failed: {}", ex.getMessage());
+            return jsonError("知识检索失败：" + ex.getMessage());
         }
     }
 

@@ -1,0 +1,254 @@
+[
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.app.what",
+    "title": "DecideMeal 是做什么的",
+    "content": "DecideMeal（SoulFood）帮你更快决定吃什么：可以和朋友开房间投票，可以看附近餐厅，可以问 AI 推荐家常菜或探店，也可以记一笔吃过什么。适合一个人纠结，也适合一群人达不成一致。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.room.create",
+    "title": "怎么发起组局投票",
+    "content": "在组局入口创建房间，填写主题（如「今晚吃什么」）、人数上限和时长，再添加至少 2 个选项（店名或菜名）。创建成功后把 6 位房间号或二维码发给朋友，对方加入后即可投票。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.room.join",
+    "title": "怎么加入别人的房间",
+    "content": "在加入房间页输入 6 位房间号，或扫描房主分享的二维码。加入后能看到主题和选项，每人每房只能投一票。房间状态为 closed 后不能再投。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.room.vote",
+    "title": "投票规则是什么",
+    "content": "同一房间同一用户只能选择一个选项。可以在房间有效时间内投票。计票以房间内选项得票为准，结束后会有胜出选项。人数达到上限或到时后房间会关闭。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.room.ai_options",
+    "title": "AI 可以帮房间补选项吗",
+    "content": "可以。创建房间时若选项不够，可让 AI 按主题和大家口味补候选项，来源会标记为 ai。补选项仍要你确认后再开票，避免模型编造不存在的店。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.nearby.how",
+    "title": "附近觅食怎么用",
+    "content": "授权定位后，应用会按你的位置搜索附近餐厅，可按品类或关键词筛选。列表里的店来自地图 POI，不是虚构店名。没有定位时无法做「附近」推荐，只能做口味或菜谱建议。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.nearby.want",
+    "title": "「想去」是什么",
+    "content": "在附近餐厅上标记「想去」，会记在你的想去列表里，方便以后组局或让 AI 优先考虑这些店。想去不是收藏夹里的餐厅收藏，两者可以同时用。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.ai.chat",
+    "title": "AI 助手能做什么",
+    "content": "可以聊今晚吃什么、怎么做一道菜、看菜单/冰箱照片给建议、帮你搜附近店、收藏菜谱或餐厅、以及按主题创建投票房。涉及真实店名和菜谱时，应走查询而不是编造。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.ai.memory",
+    "title": "AI 为什么记得我的口味",
+    "content": "登录后会读取你的口味偏好、收藏和自动抽取的记忆（长期偏好、近期吃过什么）。你可以在偏好设置里改辣度、忌口。记忆不是把全部聊天原文永久向量化，第一期主要是结构化偏好和短记忆。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.ai.image",
+    "title": "发图片能做什么",
+    "content": "可以拍冰箱食材、菜单或成品菜。AI 会识别可见食材或菜名，再建议能做的菜或点单组合。照片模糊、光线差或只拍到包装时，识别会不准，需要你补充文字。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.recipe.library",
+    "title": "菜谱库里的菜从哪来",
+    "content": "应用内有一份菜谱库（如番茄炒蛋、红烧肉），包含食材和步骤。AI 讲「怎么做」时应优先用库里的步骤。库里没有的菜，应说明是通用做法，不能假装来自本库。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.pref.where",
+    "title": "口味和忌口在哪改",
+    "content": "在偏好设置里改辣度、甜度、标签，以及是否忌香菜、忌花生和其他过敏原。这些会直接影响附近推荐和 AI 建议，避免反复在对话里纠正。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.favorite.what",
+    "title": "收藏能藏什么",
+    "content": "可以收藏菜谱、餐厅，也可以收藏某一条 AI 回复。收藏出现在收藏页，AI 会参考最近收藏做个性化，但不会只推荐收藏过的内容。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.order.record",
+    "title": "订单和记录有什么区别",
+    "content": "订单是你记下来的一餐（店名、金额、点了什么、时间）。记录是时间线，包括投票、收藏、吃过、AI 推荐等事件。记账方便回顾花销，记录方便看「最近都决定过什么」。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.friend.chat",
+    "title": "好友和邀请码",
+    "content": "用邀请码注册或主动加好友后，双方会出现在好友列表，可以私聊。私聊除了文字，还可以分享投票结果卡片。邀请记录和好友关系是两张表，邀请完成才会自动加好友。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.notify",
+    "title": "通知里会有什么",
+    "content": "站内通知用于房间、好友等事件提醒。未读会按用户聚合。点开后可按 payload 跳到对应房间或会话。"
+  },
+  {
+    "sourceType": "faq",
+    "sourceKey": "faq.login",
+    "title": "需要登录才能用吗",
+    "content": "浏览和部分 AI 闲聊可以不登录。创建/加入房间、收藏、想去、记账、好友、个性化记忆需要登录。账号可以是用户名密码；微信 OpenId 字段为后续渠道预留。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.leftover.rice",
+    "title": "隔夜米饭怎么处理",
+    "content": "隔夜米饭建议尽快冷藏，不要在室温放超过 2 小时。食用前充分加热至热透。隔夜饭适合炒饭或煮粥，不要反复解冻再冷藏。已变味、发黏或有异味的丢掉。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.leftover.meat",
+    "title": "隔夜肉菜能不能吃",
+    "content": "红烧肉、炖菜冷藏后第二天加热可以吃，先看色泽气味。海鲜、凉菜、浇过生酱汁的菜隔夜风险更高，不建议留。加热要彻底，不要只温一下。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.fridge.veg",
+    "title": "蔬菜怎么冷藏更耐放",
+    "content": "叶菜用厨房纸吸湿再装袋冷藏，根茎类（土豆、洋葱、蒜）宜阴凉干燥，不要和需要冷藏的叶菜混放。菌菇忌洗太湿再进冰箱。尽快吃掉蔫掉的部分。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.oil.temp",
+    "title": "炒菜油温怎么看",
+    "content": "凉油下锅适合炸酱、炒糖色防糊；热油（油面微烟）适合爆香葱姜蒜和快炒蔬菜。油温不够菜会出水变蔫，油太热香料发苦。家常炒菜以刚起烟为上限。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.salt.timing",
+    "title": "盐什么时候放",
+    "content": "炒蔬菜一般出锅前放盐，能少出水、更脆。炖汤、红烧可中段放，便于入味。凉拌提前盐腌会出水，吃前再调或沥干。减盐可先用醋、香辛料提味。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.msg.use",
+    "title": "味精和鸡精",
+    "content": "家常少量味精或鸡精可以提鲜，宜在关火前后加，高温久煮鲜味会淡。已经很鲜的菌菇汤、高汤不必再加。对钠敏感或要清淡时用葱姜、白胡椒代替。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.spicy.pair",
+    "title": "吃辣怎么配更舒服",
+    "content": "辣椒刺激胃黏膜，配主食（米饭、馒头）和含蛋白/淀粉的菜比只喝冰饮更稳。酸奶、豆浆、凉茶比冰啤酒更解辣。胃不好、口腔溃疡时少吃干辣椒和花椒重的菜。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.cold.food",
+    "title": "夏天吃凉的注意",
+    "content": "冰饮、冰粉、刺身对肠胃弱的人不友好，尤其是刚运动或空腹。空调房里连续吃冰容易腹痛。解暑优先酸梅汤、温热汤面，而不是只靠冰品。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.seafood.safe",
+    "title": "海鲜怎么吃更稳",
+    "content": "海鲜要新鲜、熟透（生食只去可信店铺）。虾蟹过敏的人不要试「少量」。海鲜不宜和大量冰啤酒空腹硬配。隔夜海鲜尽量不吃，加热也难保证。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.allergy.cross",
+    "title": "过敏和忌口",
+    "content": "花生、坚果、海鲜、乳制品、麸质是常见过敏原。点餐和家烹要防交叉污染（同一锅油、同一砧板）。决定吃什么时，忌口优先于「大家都想吃的」。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.coriander",
+    "title": "香菜为什么有人受不了",
+    "content": "部分人因基因觉得香菜有肥皂味，这是味觉差异不是矫情。聚餐选项应提供无香菜版本。DecideMeal 偏好里可勾选忌香菜，推荐时应避开撒香菜的成品。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.garlic.onion",
+    "title": "葱姜蒜怎么用",
+    "content": "爆香用姜蒜去腥（肉、内脏、海鲜）；葱花多在出锅撒，久炒变甜变蔫。葱白偏香、葱绿偏鲜。不吃蒜的人可用姜和白胡椒代替部分味道。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.rice.pair",
+    "title": "下饭和配酒/配茶",
+    "content": "重油重辣配米饭或面；清淡汤羹配杂粮或少量主食。火锅配主食和蔬菜比只涮肉更平衡。喝茶解腻选乌龙/普洱，空腹浓茶对胃不好。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.one.pot",
+    "title": "一个人怎么做一顿",
+    "content": "优先「一锅出」：番茄炒蛋、青菜面、蛋炒饭、菌菇汤泡饭。先烧水或煮饭，再做一个快炒。一个人不必硬上红烧、油炸。冰箱有蛋、番茄、青菜就能做一顿。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.group.decide",
+    "title": "一群人怎么更快决定",
+    "content": "先排除绝对忌口，再在 3～5 个选项里投票，比开放讨论快。选项要具体到店或菜，不要「随便」。人多时用房间投票；人少时一人提议两人否决即可。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.late.night",
+    "title": "夜宵怎么选负担小",
+    "content": "夜宵宜温热、少油少炸：粥、面、水饺、清汤米线优于炸鸡和奶油。吃完不要紧接着躺平。肠胃不好时宁可喝热豆浆或吃少量主食。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.lunch.office",
+    "title": "上班午饭怎么选",
+    "content": "兼顾时间、油盐和下午状态：一荤一素配主食，少勾芡重口盖浇。外卖看菜品照片是否油汪汪。连续几天重口后主动换清淡或带饭沙拉+热主食。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.cut.potato",
+    "title": "土豆丝为什么会变黑",
+    "content": "切丝后氧化会发灰，立刻泡清水可减轻，炒前沥干防油溅。要脆就大火快炒、少加水；要软可盖盖焖一下。醋宜后淋，过早加醋颜色和脆度都会变。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.tofu.pre",
+    "title": "豆腐怎么处理不碎",
+    "content": "嫩豆腐适合汤和蒸，内酯豆腐忌猛翻。北豆腐可焯水去石膏味再烧。锅要够热再下锅，用锅铲推而不是翻炒。麻婆豆腐先勾薄芡再轻轻推匀。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.tomato.egg",
+    "title": "番茄炒蛋怎样更嫩",
+    "content": "蛋液加一点盐或水打散，热锅热油快速滑熟盛出，再炒番茄出汁后回锅。糖能中和酸，盐最后调。番茄要熟软出沙，夹生会酸涩。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.braise.meat",
+    "title": "红烧肉怎样不腻",
+    "content": "五花肉先焯水去血沫；炒糖色用小火，糖融化冒泡再下肉。加姜、料酒、生抽，热水没过肉小火炖到筷子能扎透，最后大火收汁。肥瘦分层的五花比纯肥肉更合适。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.soup.umami",
+    "title": "汤怎么鲜但不油",
+    "content": "筒骨、鸡架先焯水再炖，菌菇、番茄、玉米提鲜。浮油可冷藏后挑掉或吸油纸。盐出锅前放。清汤不要靠大量鸡精，鲜味来自时间和食材。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.nutrition.balance",
+    "title": "一餐怎样算吃够",
+    "content": "粗算：主食 + 蛋白质（肉蛋豆） + 一盘蔬菜。纯碳水或纯肉都容易很快又饿或很腻。减脂不是不吃主食，而是少油炸、控制总量。聚餐无法完美时，先保证蔬菜和主食。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.season.eat",
+    "title": "按季节选菜",
+    "content": "夏天偏清淡、酸、瓜类；冬天偏炖煮、根茎、菌菇汤。秋冬干燥可多喝汤羹。季节只是参考，仍以忌口和当天胃口为准。"
+  },
+  {
+    "sourceType": "common",
+    "sourceKey": "common.delivery.tip",
+    "title": "点外卖怎么少踩坑",
+    "content": "看近期评价里的「油大、很咸、送太慢」。汤面类易坨，米饭套餐相对稳。夜宵少点煎炸。到了先看包装是否漏、是否烫手（热菜应是热的）。"
+  }
+]

@@ -16,9 +16,9 @@ spring:
     baseline-version: 0
     validate-on-migrate: true
   datasource:
-    url: jdbc:postgresql://pgm-2vc574u66oe06366.pgsql.cn-chengdu.rds.aliyuncs.com:5432/food?stringtype=unspecified&currentSchema=food
-    username: commerce
-    password: nxVRjxu6iVKIoTmC
+    url: jdbc:postgresql://127.0.0.1:5432/food?stringtype=unspecified&currentSchema=food
+    username: taoyi
+    password:
     type: com.zaxxer.hikari.HikariDataSource
     hikari:
       minimum-idle: 2
@@ -40,6 +40,11 @@ spring:
         options:
           model: glm-4-flash
           temperature: 0.7
+      embedding:
+        embeddings-path: /embeddings
+        options:
+          model: embedding-3
+          dimensions: 1024
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -63,3 +68,8 @@ app:
   ai:
     vision-model: glm-4v-flash
     memory-extraction-enabled: true
+    embedding-model: embedding-3
+    embedding-dims: 1024
+    rag:
+      ingest-on-startup: true
+      top-k: 5

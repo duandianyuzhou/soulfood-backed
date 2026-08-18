@@ -7,7 +7,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-final class JsonStrings {
+public final class JsonStrings {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -22,7 +22,7 @@ final class JsonStrings {
         }
     }
 
-    static List<String> parseStringList(String json) {
+    public static List<String> parseStringList(String json) {
         if (json == null || json.isBlank()) {
             return List.of();
         }

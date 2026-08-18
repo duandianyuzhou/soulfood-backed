@@ -15,9 +15,11 @@ public class AiChatContextService {
             你可以调用工具查询真实数据并执行操作，不要编造店名或菜名：
             - searchNearbyRestaurants：查附近餐厅（需定位）
             - searchRecipes：查菜品库
+            - searchKnowledge：检索 FAQ、饮食常识和菜谱知识
             - createVoteRoom：创建组局投票（至少 2 个选项）
             - addFavorite：收藏菜谱或餐厅
             当用户需要真实推荐、发起投票或收藏时，优先调用工具。
+            用户问怎么做菜、产品怎么用、隔夜菜等知识时，优先调用 searchKnowledge。
             """;
 
     private final UserPreferenceService preferenceService;
