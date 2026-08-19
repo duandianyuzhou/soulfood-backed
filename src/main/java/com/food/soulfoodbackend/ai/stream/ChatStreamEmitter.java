@@ -59,9 +59,9 @@ public class ChatStreamEmitter {
 
     private String json(Map<String, Object> payload) {
         try {
-            return objectMapper.writeValueAsString(payload);
+            return objectMapper.writeValueAsString(payload) + "\n";
         } catch (JsonProcessingException ex) {
-            return "{\"type\":\"error\",\"message\":\"序列化失败\"}";
+            return "{\"type\":\"error\",\"message\":\"序列化失败\"}\n";
         }
     }
 }

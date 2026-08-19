@@ -29,6 +29,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.content.Media;
@@ -133,6 +135,9 @@ public class AiChatService {
         if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
             return chatWithRag(conversationId, userText, userId, lat, lng);
         }
+        if (!hasImage && missingNearbyContext(userText, userId, lat, lng)) {
+            return completeFixedReply(conversationId, userText, nearbyNeedLocationReply());
+        }
         if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
             return chatSimple(conversationId, userText, userId, lat, lng);
         }
@@ -174,6 +179,9 @@ public class AiChatService {
         if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
             return chatStreamWithRag(conversationId, userText, userId, lat, lng);
         }
+        if (!hasImage && missingNearbyContext(userText, userId, lat, lng)) {
+            return chatStreamFixedReply(conversationId, userText, nearbyNeedLocationReply());
+        }
         if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
             return chatStreamSimple(conversationId, userText, userId, lat, lng);
         }
@@ -183,8 +191,7 @@ public class AiChatService {
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
         AiChatToolContextHolder.set(userId, lat, lng, conversationId);
 
-        var requestSpec = toolStreamChatClient.prompt().system(systemPrompt);
-        applyHistory(requestSpec, conversationId);
+        var requestSpec = toolStreamChatClient.prompt().system(withHistory(systemPrompt, conversationId));
         applyUser(requestSpec, userText, imageBase64, imageMimeType);
         if (hasImage) {
             requestSpec.options(visionOptions());
@@ -233,7 +240,9 @@ public class AiChatService {
         String systemPrompt = contextService.buildSimpleSystemPrompt(userId, lat, lng);
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
         Flux<String> chunks = mapStreamChunks(
-                promptWithHistory(statelessChatClient, systemPrompt, conversationId, userText)
+                statelessChatClient.prompt()
+                        .system(withHistory(systemPrompt, conversationId))
+                        .user(userText)
                         .stream()
                         .content(),
                 buffer)
@@ -299,7 +308,9 @@ public class AiChatService {
                         hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"));
 
         Flux<String> chunks = mapStreamChunks(
-                promptWithHistory(statelessChatClient, systemPrompt, conversationId, userText)
+                statelessChatClient.prompt()
+                        .system(withHistory(systemPrompt, conversationId))
+                        .user(userText)
                         .stream()
                         .content(),
                 buffer)
@@ -376,22 +387,56 @@ public class AiChatService {
         return cards;
     }
 
-    private ChatClient.ChatClientRequestSpec promptWithHistory(
-            ChatClient client,
-            String systemPrompt,
-            String conversationId,
-            String userText) {
-        var spec = client.prompt().system(systemPrompt);
-        applyHistory(spec, conversationId);
-        spec.user(userText);
-        return spec;
+    private ChatResponse completeFixedReply(String conversationId, String userText, String reply) {
+        persistTurn(conversationId, userText, reply);
+        return new ChatResponse(conversationId, reply, List.of());
     }
 
-    private void applyHistory(ChatClient.ChatClientRequestSpec spec, String conversationId) {
-        List<org.springframework.ai.chat.messages.Message> history = chatMemory.get(conversationId);
-        if (history != null && !history.isEmpty()) {
-            spec.messages(history);
+    private Flux<String> chatStreamFixedReply(String conversationId, String userText, String reply) {
+        persistTurn(conversationId, userText, reply);
+        return Flux.just(streamEmitter.chunk(reply), streamEmitter.done(conversationId, List.of()));
+    }
+
+    private static boolean missingNearbyContext(String userText, Long userId, Double lat, Double lng) {
+        return ReactNeedDetector.needsNearbySearch(userText) && (userId == null || lat == null || lng == null);
+    }
+
+    private static String nearbyNeedLocationReply() {
+        return "搜附近餐厅需要登录并开启定位。开好定位后再问我一次，我就能查真实店铺。";
+    }
+
+    private String withHistory(String systemPrompt, String conversationId) {
+        String history = historyAsBackground(conversationId);
+        if (!StringUtils.hasText(history)) {
+            return systemPrompt;
         }
+        return systemPrompt + history;
+    }
+
+    private String historyAsBackground(String conversationId) {
+        List<Message> history = chatMemory.get(conversationId);
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        int from = Math.max(0, history.size() - 8);
+        StringBuilder sb = new StringBuilder("\n\n【最近对话，仅作背景，不要重新回答其中的旧问题】\n");
+        for (int i = from; i < history.size(); i++) {
+            Message message = history.get(i);
+            if (message.getMessageType() == MessageType.SYSTEM) {
+                continue;
+            }
+            String role = message.getMessageType() == MessageType.USER ? "用户" : "助手";
+            String text = message.getText() == null ? "" : message.getText().replace('\n', ' ').trim();
+            if (text.length() > 160) {
+                text = text.substring(0, 160) + "…";
+            }
+            if (text.isEmpty()) {
+                continue;
+            }
+            sb.append(role).append("：").append(text).append('\n');
+        }
+        sb.append("请只针对用户最新一条消息作答，不要复述或扩写上一轮回答。\n");
+        return sb.toString();
     }
 
     private void applyUser(

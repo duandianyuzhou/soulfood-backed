@@ -11,10 +11,17 @@ public final class ReactNeedDetector {
         if (!StringUtils.hasText(message)) {
             return false;
         }
+        return needsNearbySearch(message) || containsAny(message.trim(),
+                "投票", "组局", "开房", "创建房间", "建个房",
+                "收藏这", "帮我收藏", "加入收藏");
+    }
+
+    public static boolean needsNearbySearch(String message) {
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
         return containsAny(message.trim(),
                 "附近", "探店", "外卖", "地图",
-                "投票", "组局", "开房", "创建房间", "建个房",
-                "收藏这", "帮我收藏", "加入收藏",
                 "搜餐厅", "找餐厅", "找家店", "推荐几家", "有什么店",
                 "火锅店", "烧烤店", "日料店");
     }
