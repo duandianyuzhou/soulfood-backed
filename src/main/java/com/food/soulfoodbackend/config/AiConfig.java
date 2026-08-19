@@ -1,5 +1,7 @@
 package com.food.soulfoodbackend.config;
 
+import com.food.soulfoodbackend.ai.react.GuardedToolCallback;
+import com.food.soulfoodbackend.ai.react.ToolCallGuard;
 import com.food.soulfoodbackend.chat.PgChatMemoryRepository;
 import com.food.soulfoodbackend.service.AiChatTools;
 import org.springframework.ai.chat.client.ChatClient;
@@ -7,6 +9,8 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.support.ToolCallbacks;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,8 +20,8 @@ public class AiConfig {
     private static final String SYSTEM_PROMPT = """
             你是 SoulFood 美食助手，擅长中餐推荐、菜谱讲解和饮食搭配建议。
             回答要简洁实用，语气亲切，优先给出可操作的推荐。
-            不要复述用户原话，不要把同一段建议写两遍。
-            只回答用户最新一条消息。
+            结合对话历史理解用户意图。
+            不要复述用户原话，不要把上一轮回答原文再输出一遍。
             """;
 
     @Bean
@@ -28,22 +32,32 @@ public class AiConfig {
                 .build();
     }
 
+    @Bean
+    public ToolCallback[] guardedAiTools(AiChatTools aiChatTools, ToolCallGuard toolCallGuard) {
+        ToolCallback[] raw = ToolCallbacks.from(aiChatTools);
+        ToolCallback[] guarded = new ToolCallback[raw.length];
+        for (int i = 0; i < raw.length; i++) {
+            guarded[i] = new GuardedToolCallback(raw[i], toolCallGuard);
+        }
+        return guarded;
+    }
+
     /** 复杂 ReAct（非流式）：智谱 GLM + 工具 + 会话记忆 */
     @Bean
-    public ChatClient chatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory, AiChatTools aiChatTools) {
+    public ChatClient chatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory, ToolCallback[] guardedAiTools) {
         return ChatClient.builder(openAiChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(aiChatTools)
+                .defaultToolCallbacks(guardedAiTools)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 
     /** 流式 ReAct：智谱 GLM + 工具；记忆由业务在流结束后写入，避免 advisor 把同一轮存两遍 */
     @Bean
-    public ChatClient toolStreamChatClient(OpenAiChatModel openAiChatModel, AiChatTools aiChatTools) {
+    public ChatClient toolStreamChatClient(OpenAiChatModel openAiChatModel, ToolCallback[] guardedAiTools) {
         return ChatClient.builder(openAiChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(aiChatTools)
+                .defaultToolCallbacks(guardedAiTools)
                 .build();
     }
 

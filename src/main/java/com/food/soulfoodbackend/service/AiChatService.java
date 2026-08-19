@@ -1,11 +1,19 @@
 package com.food.soulfoodbackend.service;
 
-import com.food.soulfoodbackend.ai.rag.KnowledgeQueryDetector;
 import com.food.soulfoodbackend.ai.rag.RagHit;
 import com.food.soulfoodbackend.ai.rag.RagSearchService;
-import com.food.soulfoodbackend.ai.rag.ReactNeedDetector;
+import com.food.soulfoodbackend.ai.react.ToolCallGuard;
+import com.food.soulfoodbackend.ai.router.ChatIntent;
+import com.food.soulfoodbackend.ai.router.IntentRouter;
+import com.food.soulfoodbackend.ai.router.RouteDecision;
 import com.food.soulfoodbackend.ai.stream.ChatStreamEmitter;
 import com.food.soulfoodbackend.ai.stream.StreamDelta;
+import com.food.soulfoodbackend.ai.workflow.CookFromFridgeWorkflow;
+import com.food.soulfoodbackend.ai.workflow.NearbyEatWorkflow;
+import com.food.soulfoodbackend.ai.workflow.PendingWorkflowSession;
+import com.food.soulfoodbackend.ai.workflow.PendingWorkflowStore;
+import com.food.soulfoodbackend.ai.workflow.VoteRoomWorkflow;
+import com.food.soulfoodbackend.ai.workflow.WorkflowResult;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.tools.OrderTools;
@@ -25,6 +33,7 @@ import com.food.soulfoodbackend.dto.ai.RecommendRecipesRequest;
 import com.food.soulfoodbackend.dto.ai.RecommendRecipesResponse;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
+import com.food.soulfoodbackend.dto.ai.WorkflowContinueRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -43,6 +52,7 @@ import org.springframework.util.MimeType;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.Base64;
 import java.util.ArrayList;
@@ -71,6 +81,12 @@ public class AiChatService {
     private final AiMemoryExtractionService memoryExtractionService;
     private final RagSearchService ragSearchService;
     private final ChatStreamEmitter streamEmitter;
+    private final IntentRouter intentRouter;
+    private final NearbyEatWorkflow nearbyEatWorkflow;
+    private final CookFromFridgeWorkflow cookFromFridgeWorkflow;
+    private final VoteRoomWorkflow voteRoomWorkflow;
+    private final PendingWorkflowStore pendingWorkflowStore;
+    private final ToolCallGuard toolCallGuard;
     private final Cache<String, RecommendRecipesResponse> recipeRecommendCache;
     private final OrderTools orderTools;
 
@@ -92,6 +108,12 @@ public class AiChatService {
             AiMemoryExtractionService memoryExtractionService,
             RagSearchService ragSearchService,
             ChatStreamEmitter streamEmitter,
+            IntentRouter intentRouter,
+            NearbyEatWorkflow nearbyEatWorkflow,
+            CookFromFridgeWorkflow cookFromFridgeWorkflow,
+            VoteRoomWorkflow voteRoomWorkflow,
+            PendingWorkflowStore pendingWorkflowStore,
+            ToolCallGuard toolCallGuard,
             OrderTools orderTools) {
         this.chatClient = chatClient;
         this.toolStreamChatClient = toolStreamChatClient;
@@ -107,6 +129,12 @@ public class AiChatService {
         this.memoryExtractionService = memoryExtractionService;
         this.ragSearchService = ragSearchService;
         this.streamEmitter = streamEmitter;
+        this.intentRouter = intentRouter;
+        this.nearbyEatWorkflow = nearbyEatWorkflow;
+        this.cookFromFridgeWorkflow = cookFromFridgeWorkflow;
+        this.voteRoomWorkflow = voteRoomWorkflow;
+        this.pendingWorkflowStore = pendingWorkflowStore;
+        this.toolCallGuard = toolCallGuard;
         this.recipeRecommendCache = Caffeine.newBuilder()
                 .maximumSize(500)
                 .expireAfterWrite(Duration.ofMinutes(3))
@@ -132,37 +160,19 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
-        if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
-            return chatWithRag(conversationId, userText, userId, lat, lng);
-        }
-        if (!hasImage && missingNearbyContext(userText, userId, lat, lng)) {
-            return completeFixedReply(conversationId, userText, nearbyNeedLocationReply());
-        }
-        if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
-            return chatSimple(conversationId, userText, userId, lat, lng);
-        }
-        String systemPrompt = hasImage
-                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
-                : contextService.buildSystemPrompt(userId, lat, lng);
-        try {
-            AiChatToolContextHolder.set(userId, lat, lng, conversationId);
-            String reply = safeCall(() -> {
-                var spec = chatClient.prompt().system(systemPrompt);
-                applyUser(spec, userText, imageBase64, imageMimeType);
-                if (hasImage) {
-                    spec.options(visionOptions());
-                }
-                return spec.advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                        .call()
-                        .content();
-            }, "今天可以试试番茄炒蛋，简单又下饭。");
-            List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
-            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
-            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
-            return new ChatResponse(conversationId, reply, cards);
-        } finally {
-            AiChatToolContextHolder.clear();
-        }
+        RouteDecision decision = intentRouter.route(userText, hasImage, lat, lng);
+        return switch (decision.intent()) {
+            case RECIPE_RAG -> chatWithRag(conversationId, userText, userId, lat, lng);
+            case NEARBY_EAT -> finishWorkflow(conversationId, userText, userId,
+                    nearbyEatWorkflow.run(conversationId, userText, userId, lat, lng));
+            case COOK_FROM_FRIDGE -> finishWorkflow(conversationId, userText, userId,
+                    cookFromFridgeWorkflow.start(conversationId, userText, userId, imageBase64, imageMimeType));
+            case VOTE_ROOM -> finishWorkflow(conversationId, userText, userId,
+                    voteRoomWorkflow.start(conversationId, userText, userId, lat, lng));
+            case SIMPLE_CHAT -> chatSimple(conversationId, userText, userId, lat, lng);
+            case OPEN_REACT -> chatWithTools(
+                    conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
+        };
     }
 
     public Flux<String> chatStreamNdjson(
@@ -176,44 +186,19 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
-        if (!hasImage && KnowledgeQueryDetector.looksLikeKnowledgeQuery(userText)) {
-            return chatStreamWithRag(conversationId, userText, userId, lat, lng);
-        }
-        if (!hasImage && missingNearbyContext(userText, userId, lat, lng)) {
-            return chatStreamFixedReply(conversationId, userText, nearbyNeedLocationReply());
-        }
-        if (!hasImage && !ReactNeedDetector.needsReact(userText)) {
-            return chatStreamSimple(conversationId, userText, userId, lat, lng);
-        }
-        String systemPrompt = hasImage
-                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
-                : contextService.buildSystemPrompt(userId, lat, lng);
-        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
-        AiChatToolContextHolder.set(userId, lat, lng, conversationId);
-
-        var requestSpec = toolStreamChatClient.prompt().system(withHistory(systemPrompt, conversationId));
-        applyUser(requestSpec, userText, imageBase64, imageMimeType);
-        if (hasImage) {
-            requestSpec.options(visionOptions());
-        }
-
-        Flux<String> chunks = mapStreamChunks(requestSpec.stream().content(), buffer);
-
-        Mono<String> done = Mono.fromCallable(() -> {
-            try {
-                String fullReply = buffer.get().toString();
-                persistTurn(conversationId, userText, fullReply);
-                List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
-                messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
-                memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
-                return streamEmitter.done(conversationId, cards);
-            } finally {
-                AiChatToolContextHolder.clear();
-            }
-        });
-
-        return chunks.concatWith(done.flux())
-                .doFinally(signal -> AiChatToolContextHolder.clear());
+        ChatIntent intent = intentRouter.route(userText, hasImage, lat, lng).intent();
+        return switch (intent) {
+            case RECIPE_RAG -> chatStreamWithRag(conversationId, userText, userId, lat, lng);
+            case NEARBY_EAT -> streamWorkflow(conversationId, userText, userId,
+                    () -> nearbyEatWorkflow.run(conversationId, userText, userId, lat, lng));
+            case COOK_FROM_FRIDGE -> streamWorkflow(conversationId, userText, userId,
+                    () -> cookFromFridgeWorkflow.start(conversationId, userText, userId, imageBase64, imageMimeType));
+            case VOTE_ROOM -> streamWorkflow(conversationId, userText, userId,
+                    () -> voteRoomWorkflow.start(conversationId, userText, userId, lat, lng));
+            case SIMPLE_CHAT -> chatStreamSimple(conversationId, userText, userId, lat, lng);
+            case OPEN_REACT -> chatStreamWithTools(
+                    conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
+        };
     }
 
     public Flux<String> chatStream(String conversationId, String message, Long userId) {
@@ -239,13 +224,10 @@ public class AiChatService {
     private Flux<String> chatStreamSimple(String conversationId, String userText, Long userId, Double lat, Double lng) {
         String systemPrompt = contextService.buildSimpleSystemPrompt(userId, lat, lng);
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
-        Flux<String> chunks = mapStreamChunks(
-                statelessChatClient.prompt()
-                        .system(withHistory(systemPrompt, conversationId))
-                        .user(userText)
-                        .stream()
-                        .content(),
-                buffer)
+        var spec = statelessChatClient.prompt().system(systemPrompt);
+        applyHistory(spec, conversationId);
+        spec.user(userText);
+        Flux<String> chunks = mapStreamChunks(spec.stream().content(), buffer, conversationId)
                 .onErrorResume(ex -> {
                     log.warn("simple stream failed: {}", ex.getMessage());
                     String fallback = "今天可以试试番茄炒蛋，简单又下饭。";
@@ -266,6 +248,142 @@ public class AiChatService {
         return chunks.concatWith(done.flux());
     }
 
+    public Flux<String> continueWorkflow(String runId, WorkflowContinueRequest request, Long userId) {
+        PendingWorkflowSession session = pendingWorkflowStore.get(runId);
+        if (session == null) {
+            String reply = "这个流程已经过期或结束了，请重新说一次需求。";
+            return Flux.just(streamEmitter.chunk(reply), streamEmitter.done(request.getConversationId(), List.of()));
+        }
+        conversationService.assertOwnedByUser(session.getConversationId(), userId);
+        if (StringUtils.hasText(request.getStepId()) && !request.getStepId().equals(session.getWaitingStepId())) {
+            String reply = "当前待确认步骤不匹配，请刷新对话后再试。";
+            return Flux.just(streamEmitter.chunk(reply), streamEmitter.done(session.getConversationId(), List.of()));
+        }
+        String userText = StringUtils.hasText(request.getMessage()) ? request.getMessage().trim() : "确认并继续";
+        prepareConversation(session.getConversationId(), userId, userText);
+        return Mono.fromCallable(() -> resumePending(session, request))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(result -> emitWorkflowStream(session.getConversationId(), userText, userId, result));
+    }
+
+    private WorkflowResult resumePending(PendingWorkflowSession session, WorkflowContinueRequest request) {
+        if (session.getKind() == ChatIntent.COOK_FROM_FRIDGE) {
+            return cookFromFridgeWorkflow.resume(session, request.getImageBase64(), request.getImageMimeType());
+        }
+        return voteRoomWorkflow.resume(session, request.getOptions(), request.getMessage());
+    }
+
+    private ChatResponse finishWorkflow(String conversationId, String userText, Long userId, WorkflowResult result) {
+        persistTurn(conversationId, userText, result.reply());
+        messageMetaService.saveOnLatestAssistant(conversationId, result.cards(), result.snapshot());
+        memoryExtractionService.scheduleExtraction(userId, conversationId, userText, result.reply());
+        return new ChatResponse(conversationId, result.reply(), result.cards(), result.snapshot());
+    }
+
+    private Flux<String> streamWorkflow(
+            String conversationId,
+            String userText,
+            Long userId,
+            java.util.function.Supplier<WorkflowResult> supplier) {
+        return Mono.fromCallable(supplier::get)
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(result -> emitWorkflowStream(conversationId, userText, userId, result));
+    }
+
+    private Flux<String> emitWorkflowStream(
+            String conversationId,
+            String userText,
+            Long userId,
+            WorkflowResult result) {
+        persistTurn(conversationId, userText, result.reply());
+        messageMetaService.saveOnLatestAssistant(conversationId, result.cards(), result.snapshot());
+        memoryExtractionService.scheduleExtraction(userId, conversationId, userText, result.reply());
+        List<String> lines = new ArrayList<>(result.events());
+        lines.add(streamEmitter.done(conversationId, result.cards()));
+        return Flux.fromIterable(lines);
+    }
+
+    private ChatResponse chatWithTools(
+            String conversationId,
+            String userText,
+            Long userId,
+            Double lat,
+            Double lng,
+            String imageBase64,
+            String imageMimeType,
+            boolean hasImage) {
+        String systemPrompt = hasImage
+                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
+                : contextService.buildSystemPrompt(userId, lat, lng);
+        toolCallGuard.begin(conversationId);
+        try {
+            AiChatToolContextHolder.set(userId, lat, lng, conversationId);
+            String reply = safeCall(() -> {
+                var spec = chatClient.prompt().system(systemPrompt);
+                applyUser(spec, userText, imageBase64, imageMimeType);
+                if (hasImage) {
+                    spec.options(visionOptions());
+                }
+                return spec.advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                        .call()
+                        .content();
+            }, "今天可以试试番茄炒蛋，简单又下饭。");
+            List<ChatActionCardDto> cards = cardResolver.resolve(reply, userId, lat, lng);
+            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
+            return new ChatResponse(conversationId, reply, cards);
+        } finally {
+            AiChatToolContextHolder.clear();
+            toolCallGuard.end();
+        }
+    }
+
+    private Flux<String> chatStreamWithTools(
+            String conversationId,
+            String userText,
+            Long userId,
+            Double lat,
+            Double lng,
+            String imageBase64,
+            String imageMimeType,
+            boolean hasImage) {
+        String systemPrompt = hasImage
+                ? contextService.buildVisionSystemPrompt(userId, lat, lng)
+                : contextService.buildSystemPrompt(userId, lat, lng);
+        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+        toolCallGuard.begin(conversationId);
+        AiChatToolContextHolder.set(userId, lat, lng, conversationId);
+
+        var requestSpec = toolStreamChatClient.prompt().system(systemPrompt);
+        applyHistory(requestSpec, conversationId);
+        applyUser(requestSpec, userText, imageBase64, imageMimeType);
+        if (hasImage) {
+            requestSpec.options(visionOptions());
+        }
+
+        Flux<String> chunks = mapStreamChunks(requestSpec.stream().content(), buffer, conversationId);
+
+        Mono<String> done = Mono.fromCallable(() -> {
+            try {
+                String fullReply = buffer.get().toString();
+                persistTurn(conversationId, userText, fullReply);
+                List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
+                messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+                memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
+                return streamEmitter.done(conversationId, cards);
+            } finally {
+                AiChatToolContextHolder.clear();
+                toolCallGuard.end();
+            }
+        });
+
+        return chunks.concatWith(done.flux())
+                .doFinally(signal -> {
+                    AiChatToolContextHolder.clear();
+                    toolCallGuard.end();
+                });
+    }
+
     private ChatResponse chatWithRag(
             String conversationId,
             String userText,
@@ -274,11 +392,11 @@ public class AiChatService {
             Double lng) {
         List<RagHit> hits = safeSearch(userText);
         String systemPrompt = buildRagSystemPrompt(userId, lat, lng, hits);
-        String reply = safeCall(() -> statelessChatClient.prompt()
-                .system(systemPrompt)
-                .user(userText)
-                .call()
-                .content(), "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。");
+        String reply = safeCall(() -> {
+            var spec = statelessChatClient.prompt().system(systemPrompt);
+            applyHistory(spec, conversationId);
+            return spec.user(userText).call().content();
+        }, "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。");
         persistTurn(conversationId, userText, reply);
         List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(reply, userId, lat, lng));
         messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
@@ -307,13 +425,10 @@ public class AiChatService {
                         "done",
                         hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"));
 
-        Flux<String> chunks = mapStreamChunks(
-                statelessChatClient.prompt()
-                        .system(withHistory(systemPrompt, conversationId))
-                        .user(userText)
-                        .stream()
-                        .content(),
-                buffer)
+        var spec = statelessChatClient.prompt().system(systemPrompt);
+        applyHistory(spec, conversationId);
+        spec.user(userText);
+        Flux<String> chunks = mapStreamChunks(spec.stream().content(), buffer, conversationId)
                 .onErrorResume(ex -> {
                     log.warn("RAG stream failed: {}", ex.getMessage());
                     String fallback = "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。";
@@ -362,10 +477,14 @@ public class AiChatService {
                 new AssistantMessage(reply == null ? "" : reply)));
     }
 
-    private Flux<String> mapStreamChunks(Flux<String> content, AtomicReference<StringBuilder> buffer) {
+    private Flux<String> mapStreamChunks(
+            Flux<String> content,
+            AtomicReference<StringBuilder> buffer,
+            String conversationId) {
+        String priorAssistant = lastAssistantText(conversationId);
         return content.map(incoming -> {
             String previous = buffer.get().toString();
-            String delta = StreamDelta.of(previous, incoming);
+            String delta = StreamDelta.of(previous, incoming, priorAssistant);
             if (delta.isEmpty()) {
                 return "";
             }
@@ -387,56 +506,41 @@ public class AiChatService {
         return cards;
     }
 
-    private ChatResponse completeFixedReply(String conversationId, String userText, String reply) {
-        persistTurn(conversationId, userText, reply);
-        return new ChatResponse(conversationId, reply, List.of());
-    }
-
-    private Flux<String> chatStreamFixedReply(String conversationId, String userText, String reply) {
-        persistTurn(conversationId, userText, reply);
-        return Flux.just(streamEmitter.chunk(reply), streamEmitter.done(conversationId, List.of()));
-    }
-
-    private static boolean missingNearbyContext(String userText, Long userId, Double lat, Double lng) {
-        return ReactNeedDetector.needsNearbySearch(userText) && (userId == null || lat == null || lng == null);
-    }
-
-    private static String nearbyNeedLocationReply() {
-        return "搜附近餐厅需要登录并开启定位。开好定位后再问我一次，我就能查真实店铺。";
-    }
-
-    private String withHistory(String systemPrompt, String conversationId) {
-        String history = historyAsBackground(conversationId);
-        if (!StringUtils.hasText(history)) {
-            return systemPrompt;
+    private void applyHistory(ChatClient.ChatClientRequestSpec spec, String conversationId) {
+        List<Message> history = promptHistory(conversationId);
+        if (!history.isEmpty()) {
+            spec.messages(history);
         }
-        return systemPrompt + history;
     }
 
-    private String historyAsBackground(String conversationId) {
+    private List<Message> promptHistory(String conversationId) {
+        List<Message> history = chatMemory.get(conversationId);
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        List<Message> usable = new ArrayList<>();
+        for (Message message : history) {
+            if (message.getMessageType() == MessageType.SYSTEM) {
+                continue;
+            }
+            usable.add(message);
+        }
+        int from = Math.max(0, usable.size() - 20);
+        return new ArrayList<>(usable.subList(from, usable.size()));
+    }
+
+    private String lastAssistantText(String conversationId) {
         List<Message> history = chatMemory.get(conversationId);
         if (history == null || history.isEmpty()) {
             return "";
         }
-        int from = Math.max(0, history.size() - 8);
-        StringBuilder sb = new StringBuilder("\n\n【最近对话，仅作背景，不要重新回答其中的旧问题】\n");
-        for (int i = from; i < history.size(); i++) {
+        for (int i = history.size() - 1; i >= 0; i--) {
             Message message = history.get(i);
-            if (message.getMessageType() == MessageType.SYSTEM) {
-                continue;
+            if (message.getMessageType() == MessageType.ASSISTANT && StringUtils.hasText(message.getText())) {
+                return message.getText();
             }
-            String role = message.getMessageType() == MessageType.USER ? "用户" : "助手";
-            String text = message.getText() == null ? "" : message.getText().replace('\n', ' ').trim();
-            if (text.length() > 160) {
-                text = text.substring(0, 160) + "…";
-            }
-            if (text.isEmpty()) {
-                continue;
-            }
-            sb.append(role).append("：").append(text).append('\n');
         }
-        sb.append("请只针对用户最新一条消息作答，不要复述或扩写上一轮回答。\n");
-        return sb.toString();
+        return "";
     }
 
     private void applyUser(
@@ -509,7 +613,7 @@ public class AiChatService {
         String role = "USER".equals(row.getMessageType()) ? "user" : "assistant";
         String content = row.getContent() != null ? row.getContent() : "";
         List<ChatActionCardDto> cards = messageMetaService.parseCards(row.getMetaJson());
-        return new ChatHistoryMessageDto(role, content, cards);
+        return new ChatHistoryMessageDto(role, content, cards, messageMetaService.parseWorkflow(row.getMetaJson()));
     }
 
     public List<AiConversationItemDto> listConversations(Long userId, String keyword, String sceneTag) {

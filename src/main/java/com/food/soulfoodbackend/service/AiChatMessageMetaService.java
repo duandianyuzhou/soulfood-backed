@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.food.soulfoodbackend.domain.entity.SfAiChatMessage;
 import com.food.soulfoodbackend.dto.ai.ChatActionCardDto;
+import com.food.soulfoodbackend.dto.ai.WorkflowSnapshotDto;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,12 +28,18 @@ public class AiChatMessageMetaService {
     private final ObjectMapper objectMapper;
 
     @Transactional
-    public void saveCardsOnLatestAssistant(String conversationId, List<ChatActionCardDto> cards) {
-        if (conversationId == null || conversationId.isBlank() || cards == null || cards.isEmpty()) {
+    public void saveOnLatestAssistant(
+            String conversationId,
+            List<ChatActionCardDto> cards,
+            WorkflowSnapshotDto workflow) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return;
+        }
+        if ((cards == null || cards.isEmpty()) && workflow == null) {
             return;
         }
         for (int attempt = 0; attempt < 8; attempt++) {
-            if (saveCardsOnce(conversationId, cards)) {
+            if (saveOnce(conversationId, cards, workflow)) {
                 return;
             }
             try {
@@ -42,10 +49,18 @@ public class AiChatMessageMetaService {
                 return;
             }
         }
-        log.warn("Failed to save chat cards after retries for conversation {}", conversationId);
+        log.warn("Failed to save chat meta after retries for conversation {}", conversationId);
     }
 
-    private boolean saveCardsOnce(String conversationId, List<ChatActionCardDto> cards) {
+    @Transactional
+    public void saveCardsOnLatestAssistant(String conversationId, List<ChatActionCardDto> cards) {
+        saveOnLatestAssistant(conversationId, cards, null);
+    }
+
+    private boolean saveOnce(
+            String conversationId,
+            List<ChatActionCardDto> cards,
+            WorkflowSnapshotDto workflow) {
         SfAiChatMessage row = messageMapper.selectOne(new LambdaQueryWrapper<SfAiChatMessage>()
                 .eq(SfAiChatMessage::getConversationId, conversationId)
                 .eq(SfAiChatMessage::getMessageType, "ASSISTANT")
@@ -57,12 +72,17 @@ public class AiChatMessageMetaService {
         }
         try {
             Map<String, Object> meta = new HashMap<>();
-            meta.put("cards", cards);
+            if (cards != null && !cards.isEmpty()) {
+                meta.put("cards", cards);
+            }
+            if (workflow != null) {
+                meta.put("workflow", workflow);
+            }
             row.setMetaJson(objectMapper.writeValueAsString(meta));
             messageMapper.updateById(row);
             return true;
         } catch (Exception ex) {
-            log.warn("Failed to save chat cards meta: {}", ex.getMessage());
+            log.warn("Failed to save chat meta: {}", ex.getMessage());
             return false;
         }
     }
@@ -80,6 +100,22 @@ public class AiChatMessageMetaService {
             return objectMapper.convertValue(cardsNode, CARD_LIST_TYPE);
         } catch (Exception ex) {
             return List.of();
+        }
+    }
+
+    public WorkflowSnapshotDto parseWorkflow(String metaJson) {
+        if (metaJson == null || metaJson.isBlank()) {
+            return null;
+        }
+        try {
+            var node = objectMapper.readTree(metaJson);
+            var workflowNode = node.get("workflow");
+            if (workflowNode == null || workflowNode.isNull()) {
+                return null;
+            }
+            return objectMapper.convertValue(workflowNode, WorkflowSnapshotDto.class);
+        } catch (Exception ex) {
+            return null;
         }
     }
 }

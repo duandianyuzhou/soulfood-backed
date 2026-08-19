@@ -13,6 +13,7 @@ import com.food.soulfoodbackend.dto.ai.RecommendRecipesResponse;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsRequest;
 import com.food.soulfoodbackend.dto.ai.SuggestOptionsResponse;
 import com.food.soulfoodbackend.dto.ai.UpdateConversationRequest;
+import com.food.soulfoodbackend.dto.ai.WorkflowContinueRequest;
 import com.food.soulfoodbackend.service.AiChatService;
 import com.food.soulfoodbackend.service.AiRateLimitService;
 import jakarta.validation.Valid;
@@ -74,6 +75,17 @@ public class AiChatController {
                 request.lng(),
                 request.imageBase64(),
                 request.imageMimeType());
+    }
+
+    @PostMapping(value = "/workflow/{runId}/continue", produces = "application/x-ndjson;charset=UTF-8")
+    public Flux<String> continueWorkflow(
+            @PathVariable String runId,
+            @RequestBody WorkflowContinueRequest request) {
+        checkAiRateLimit();
+        if (request == null) {
+            request = new WorkflowContinueRequest();
+        }
+        return aiChatService.continueWorkflow(runId, request, UserContext.getUserId());
     }
 
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
