@@ -52,6 +52,7 @@ spring:
         options:
           model: qwen3-embedding:0.6b
     model:
+      chat: openai
       embedding: ollama
 mybatis-plus:
   configuration:

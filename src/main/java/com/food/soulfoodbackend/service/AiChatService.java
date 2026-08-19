@@ -5,6 +5,7 @@ import com.food.soulfoodbackend.ai.rag.RagHit;
 import com.food.soulfoodbackend.ai.rag.RagSearchService;
 import com.food.soulfoodbackend.ai.rag.ReactNeedDetector;
 import com.food.soulfoodbackend.ai.stream.ChatStreamEmitter;
+import com.food.soulfoodbackend.ai.stream.StreamDelta;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.tools.OrderTools;
@@ -55,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class AiChatService {
 
     private final ChatClient chatClient;
+    private final ChatClient toolStreamChatClient;
     private final ChatClient simpleChatClient;
     private final ChatClient statelessChatClient;
     private final ChatMemory chatMemory;
@@ -75,6 +77,7 @@ public class AiChatService {
 
     public AiChatService(
             @Qualifier("chatClient") ChatClient chatClient,
+            @Qualifier("toolStreamChatClient") ChatClient toolStreamChatClient,
             @Qualifier("simpleChatClient") ChatClient simpleChatClient,
             @Qualifier("statelessChatClient") ChatClient statelessChatClient,
             ChatMemory chatMemory,
@@ -89,6 +92,7 @@ public class AiChatService {
             ChatStreamEmitter streamEmitter,
             OrderTools orderTools) {
         this.chatClient = chatClient;
+        this.toolStreamChatClient = toolStreamChatClient;
         this.simpleChatClient = simpleChatClient;
         this.statelessChatClient = statelessChatClient;
         this.chatMemory = chatMemory;
@@ -179,24 +183,19 @@ public class AiChatService {
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
         AiChatToolContextHolder.set(userId, lat, lng, conversationId);
 
-        var requestSpec = chatClient.prompt().system(systemPrompt);
+        var requestSpec = toolStreamChatClient.prompt().system(systemPrompt);
+        applyHistory(requestSpec, conversationId);
         applyUser(requestSpec, userText, imageBase64, imageMimeType);
         if (hasImage) {
             requestSpec.options(visionOptions());
         }
 
-        Flux<String> chunks = requestSpec
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .stream()
-                .content()
-                .map(chunk -> {
-                    buffer.get().append(chunk);
-                    return streamEmitter.chunk(chunk);
-                });
+        Flux<String> chunks = mapStreamChunks(requestSpec.stream().content(), buffer);
 
         Mono<String> done = Mono.fromCallable(() -> {
             try {
                 String fullReply = buffer.get().toString();
+                persistTurn(conversationId, userText, fullReply);
                 List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
                 messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
                 memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
@@ -233,18 +232,13 @@ public class AiChatService {
     private Flux<String> chatStreamSimple(String conversationId, String userText, Long userId, Double lat, Double lng) {
         String systemPrompt = contextService.buildSimpleSystemPrompt(userId, lat, lng);
         AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
-        Flux<String> chunks = simpleChatClient.prompt()
-                .system(systemPrompt)
-                .user(userText)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .stream()
-                .content()
-                .map(chunk -> {
-                    buffer.get().append(chunk);
-                    return streamEmitter.chunk(chunk);
-                })
+        Flux<String> chunks = mapStreamChunks(
+                promptWithHistory(statelessChatClient, systemPrompt, conversationId, userText)
+                        .stream()
+                        .content(),
+                buffer)
                 .onErrorResume(ex -> {
-                    log.warn("local simple stream failed: {}", ex.getMessage());
+                    log.warn("simple stream failed: {}", ex.getMessage());
                     String fallback = "今天可以试试番茄炒蛋，简单又下饭。";
                     buffer.get().append(fallback);
                     return Flux.just(streamEmitter.chunk(fallback));
@@ -254,6 +248,7 @@ public class AiChatService {
             if (fullReply.isBlank()) {
                 fullReply = "今天可以试试番茄炒蛋，简单又下饭。";
             }
+            persistTurn(conversationId, userText, fullReply);
             List<ChatActionCardDto> cards = cardResolver.resolve(fullReply, userId, lat, lng);
             messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
             memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
@@ -275,7 +270,7 @@ public class AiChatService {
                 .user(userText)
                 .call()
                 .content(), "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。");
-        persistRagTurn(conversationId, userText, reply);
+        persistTurn(conversationId, userText, reply);
         List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(reply, userId, lat, lng));
         messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
         memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
@@ -303,15 +298,11 @@ public class AiChatService {
                         "done",
                         hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"));
 
-        Flux<String> chunks = statelessChatClient.prompt()
-                .system(systemPrompt)
-                .user(userText)
-                .stream()
-                .content()
-                .map(chunk -> {
-                    buffer.get().append(chunk);
-                    return streamEmitter.chunk(chunk);
-                })
+        Flux<String> chunks = mapStreamChunks(
+                promptWithHistory(statelessChatClient, systemPrompt, conversationId, userText)
+                        .stream()
+                        .content(),
+                buffer)
                 .onErrorResume(ex -> {
                     log.warn("RAG stream failed: {}", ex.getMessage());
                     String fallback = "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。";
@@ -324,7 +315,7 @@ public class AiChatService {
             if (fullReply.isBlank()) {
                 fullReply = "暂时没有检索到足够资料，你可以换个问法，或去菜谱库看看。";
             }
-            persistRagTurn(conversationId, userText, fullReply);
+            persistTurn(conversationId, userText, fullReply);
             List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(fullReply, userId, lat, lng));
             messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
             memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
@@ -351,8 +342,25 @@ public class AiChatService {
                 """ + ragSearchService.formatForPrompt(hits);
     }
 
-    private void persistRagTurn(String conversationId, String userText, String reply) {
-        chatMemory.add(conversationId, List.of(new UserMessage(userText), new AssistantMessage(reply)));
+    private void persistTurn(String conversationId, String userText, String reply) {
+        if (!StringUtils.hasText(userText) && !StringUtils.hasText(reply)) {
+            return;
+        }
+        chatMemory.add(conversationId, List.of(
+                new UserMessage(userText == null ? "" : userText),
+                new AssistantMessage(reply == null ? "" : reply)));
+    }
+
+    private Flux<String> mapStreamChunks(Flux<String> content, AtomicReference<StringBuilder> buffer) {
+        return content.map(incoming -> {
+            String previous = buffer.get().toString();
+            String delta = StreamDelta.of(previous, incoming);
+            if (delta.isEmpty()) {
+                return "";
+            }
+            buffer.get().append(delta);
+            return streamEmitter.chunk(delta);
+        }).filter(line -> !line.isEmpty());
     }
 
     private static List<ChatActionCardDto> mergeRagCards(List<RagHit> hits, List<ChatActionCardDto> fromText) {
@@ -366,6 +374,24 @@ public class AiChatService {
             cards.addAll(fromText);
         }
         return cards;
+    }
+
+    private ChatClient.ChatClientRequestSpec promptWithHistory(
+            ChatClient client,
+            String systemPrompt,
+            String conversationId,
+            String userText) {
+        var spec = client.prompt().system(systemPrompt);
+        applyHistory(spec, conversationId);
+        spec.user(userText);
+        return spec;
+    }
+
+    private void applyHistory(ChatClient.ChatClientRequestSpec spec, String conversationId) {
+        List<org.springframework.ai.chat.messages.Message> history = chatMemory.get(conversationId);
+        if (history != null && !history.isEmpty()) {
+            spec.messages(history);
+        }
     }
 
     private void applyUser(
