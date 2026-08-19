@@ -28,6 +28,19 @@ class LlmIntentRouterTest {
     }
 
     @Test
+    void parsesCookAliases() {
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, router.parse("""
+                {"intent":"看图做菜","confidence":0.9}
+                """).intent());
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, router.parse("""
+                {"intent":"cook_from_ingredients","confidence":0.88}
+                """).intent());
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, router.parse("""
+                {"intent":"按食材做菜","confidence":0.86}
+                """).intent());
+    }
+
+    @Test
     void invalidJsonFallsBackToReact() {
         RouteDecision decision = router.parse("not-json");
         assertEquals(ChatIntent.OPEN_REACT, decision.intent());

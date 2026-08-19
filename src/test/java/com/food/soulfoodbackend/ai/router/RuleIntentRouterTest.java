@@ -34,5 +34,9 @@ class RuleIntentRouterTest {
     void routesVoteAndChat() {
         assertEquals(ChatIntent.VOTE_ROOM, RuleIntentRouter.tryRoute("帮我开个投票组局", false, false));
         assertEquals(ChatIntent.SIMPLE_CHAT, RuleIntentRouter.tryRoute("今天心情一般想吃点清淡的", false, false));
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, RuleIntentRouter.tryRoute("冰箱里有什么能做", false, false));
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, RuleIntentRouter.tryRoute("看图做菜", false, false));
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, RuleIntentRouter.tryRoute("按食材做菜", false, false));
+        assertEquals(ChatIntent.COOK_FROM_FRIDGE, RuleIntentRouter.tryRoute("拍个菜单有什么好吃的", false, false));
     }
 }

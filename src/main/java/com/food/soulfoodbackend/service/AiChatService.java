@@ -160,6 +160,11 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
+        WorkflowResult pendingResume = resumePendingIfNeeded(
+                conversationId, userText, userId, imageBase64, imageMimeType, hasImage);
+        if (pendingResume != null) {
+            return finishWorkflow(conversationId, userText, userId, pendingResume);
+        }
         RouteDecision decision = intentRouter.route(userText, hasImage, lat, lng);
         return switch (decision.intent()) {
             case RECIPE_RAG -> chatWithRag(conversationId, userText, userId, lat, lng);
@@ -186,6 +191,11 @@ public class AiChatService {
         String userText = normalizeMessage(message, imageBase64);
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
+        WorkflowResult pendingResume = resumePendingIfNeeded(
+                conversationId, userText, userId, imageBase64, imageMimeType, hasImage);
+        if (pendingResume != null) {
+            return emitWorkflowStream(conversationId, userText, userId, pendingResume);
+        }
         ChatIntent intent = intentRouter.route(userText, hasImage, lat, lng).intent();
         return switch (intent) {
             case RECIPE_RAG -> chatStreamWithRag(conversationId, userText, userId, lat, lng);
@@ -268,9 +278,32 @@ public class AiChatService {
 
     private WorkflowResult resumePending(PendingWorkflowSession session, WorkflowContinueRequest request) {
         if (session.getKind() == ChatIntent.COOK_FROM_FRIDGE) {
-            return cookFromFridgeWorkflow.resume(session, request.getImageBase64(), request.getImageMimeType());
+            return cookFromFridgeWorkflow.resume(
+                    session, request.getImageBase64(), request.getImageMimeType(), request.getMessage());
         }
         return voteRoomWorkflow.resume(session, request.getOptions(), request.getMessage());
+    }
+
+    private WorkflowResult resumePendingIfNeeded(
+            String conversationId,
+            String userText,
+            Long userId,
+            String imageBase64,
+            String imageMimeType,
+            boolean hasImage) {
+        PendingWorkflowSession session = pendingWorkflowStore.getByConversation(conversationId);
+        if (session == null || session.getKind() != ChatIntent.COOK_FROM_FRIDGE) {
+            return null;
+        }
+        if (!"vision".equals(session.getWaitingStepId())) {
+            return null;
+        }
+        if (!hasImage
+                && !CookFromFridgeWorkflow.isSkipPhoto(userText)
+                && CookFromFridgeWorkflow.extractTextIngredients(userText).isEmpty()) {
+            return null;
+        }
+        return cookFromFridgeWorkflow.resume(session, imageBase64, imageMimeType, userText);
     }
 
     private ChatResponse finishWorkflow(String conversationId, String userText, Long userId, WorkflowResult result) {

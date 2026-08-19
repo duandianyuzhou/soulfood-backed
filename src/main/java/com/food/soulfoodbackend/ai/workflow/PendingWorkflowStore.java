@@ -13,12 +13,19 @@ public class PendingWorkflowStore {
             .expireAfterWrite(Duration.ofMinutes(30))
             .maximumSize(2000)
             .build();
+    private final Cache<String, String> byConversation = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(30))
+            .maximumSize(2000)
+            .build();
 
     public void put(PendingWorkflowSession session) {
         if (session == null || session.getRunId() == null) {
             return;
         }
         cache.put(session.getRunId(), session);
+        if (session.getConversationId() != null) {
+            byConversation.put(session.getConversationId(), session.getRunId());
+        }
     }
 
     public PendingWorkflowSession get(String runId) {
@@ -28,9 +35,22 @@ public class PendingWorkflowStore {
         return cache.getIfPresent(runId);
     }
 
+    public PendingWorkflowSession getByConversation(String conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        String runId = byConversation.getIfPresent(conversationId);
+        return runId == null ? null : cache.getIfPresent(runId);
+    }
+
     public void remove(String runId) {
-        if (runId != null) {
-            cache.invalidate(runId);
+        if (runId == null) {
+            return;
+        }
+        PendingWorkflowSession session = cache.getIfPresent(runId);
+        cache.invalidate(runId);
+        if (session != null && session.getConversationId() != null) {
+            byConversation.invalidate(session.getConversationId());
         }
     }
 }

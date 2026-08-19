@@ -18,10 +18,11 @@ public class LlmIntentRouter {
             {"intent":"nearby_eat|cook_from_fridge|recipe_rag|vote_room|open_react","confidence":0.0}
             说明：
             nearby_eat=搜附近吃什么/探店
-            cook_from_fridge=根据冰箱或菜单图做菜
-            recipe_rag=菜谱做法、产品怎么用、饮食常识
+            cook_from_fridge=冰箱做菜、看图做菜、按食材做菜、菜单图识菜（有图或只报食材都可以）
+            recipe_rag=某道菜的做法步骤、产品怎么用、饮食常识
             vote_room=组局投票
             open_react=需要查真实店、收藏或其它工具，或无法判断
+            别名也视为 cook_from_fridge：cook_from_photo、cook_from_ingredients、看图做菜、按食材做菜、冰箱做菜
             用户消息：%s
             是否有图片：%s
             是否有定位：%s
@@ -76,7 +77,8 @@ public class LlmIntentRouter {
     private static ChatIntent parseIntent(String raw) {
         return switch (raw == null ? "" : raw.trim().toLowerCase()) {
             case "nearby_eat" -> ChatIntent.NEARBY_EAT;
-            case "cook_from_fridge" -> ChatIntent.COOK_FROM_FRIDGE;
+            case "cook_from_fridge", "cook_from_photo", "cook_from_ingredients",
+                    "看图做菜", "按食材做菜", "冰箱做菜", "菜单图" -> ChatIntent.COOK_FROM_FRIDGE;
             case "recipe_rag" -> ChatIntent.RECIPE_RAG;
             case "vote_room" -> ChatIntent.VOTE_ROOM;
             default -> ChatIntent.OPEN_REACT;
