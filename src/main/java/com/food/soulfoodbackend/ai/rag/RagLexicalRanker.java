@@ -9,12 +9,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-final class RagLexicalRanker {
+public final class RagLexicalRanker {
 
     private RagLexicalRanker() {
     }
 
-    static List<RagHit> rank(String query, List<SfRagChunk> chunks, int limit) {
+    public static List<RagHit> rank(String query, List<SfRagChunk> chunks, int limit) {
         if (!StringUtils.hasText(query) || chunks == null || chunks.isEmpty()) {
             return List.of();
         }

@@ -188,7 +188,7 @@ public class VoteRoomWorkflow {
         }
     }
 
-    static List<String> extractOptions(String text) {
+    public static List<String> extractOptions(String text) {
         if (!StringUtils.hasText(text)) {
             return List.of();
         }

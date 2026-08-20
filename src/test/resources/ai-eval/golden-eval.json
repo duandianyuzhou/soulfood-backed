@@ -1,0 +1,38 @@
+{
+  "route": [
+    {"id": "image-to-fridge", "text": "随便", "hasImage": true, "hasLocation": false, "intent": "COOK_FROM_FRIDGE"},
+    {"id": "how-to-cook", "text": "红烧肉怎么做", "hasImage": false, "hasLocation": false, "intent": "RECIPE_RAG"},
+    {"id": "join-room-how", "text": "怎么加入房间", "hasImage": false, "hasLocation": false, "intent": "RECIPE_RAG"},
+    {"id": "leftover-rice", "text": "隔夜米饭能不能吃", "hasImage": false, "hasLocation": false, "intent": "RECIPE_RAG"},
+    {"id": "nearby-hotpot", "text": "附近有什么火锅", "hasImage": false, "hasLocation": false, "intent": "NEARBY_EAT"},
+    {"id": "tonight-with-loc", "text": "今晚吃什么", "hasImage": false, "hasLocation": true, "intent": "NEARBY_EAT"},
+    {"id": "tonight-no-loc", "text": "今晚吃什么", "hasImage": false, "hasLocation": false, "intent": "AMBIGUOUS"},
+    {"id": "undecided", "text": "随便吃", "hasImage": false, "hasLocation": false, "intent": "AMBIGUOUS"},
+    {"id": "vote-room", "text": "帮我开个投票组局", "hasImage": false, "hasLocation": false, "intent": "VOTE_ROOM"},
+    {"id": "fridge-text", "text": "冰箱里有什么能做", "hasImage": false, "hasLocation": false, "intent": "COOK_FROM_FRIDGE"},
+    {"id": "cook-from-photo", "text": "看图做菜", "hasImage": false, "hasLocation": false, "intent": "COOK_FROM_FRIDGE"},
+    {"id": "cook-from-ingredients", "text": "按食材做菜", "hasImage": false, "hasLocation": false, "intent": "COOK_FROM_FRIDGE"},
+    {"id": "menu-photo", "text": "拍个菜单有什么好吃的", "hasImage": false, "hasLocation": false, "intent": "COOK_FROM_FRIDGE"},
+    {"id": "small-talk", "text": "今天心情一般想吃点清淡的", "hasImage": false, "hasLocation": false, "intent": "SIMPLE_CHAT"}
+  ],
+  "rag": [
+    {"id": "faq-join-room", "query": "怎么加入房间", "expectSourceKey": "faq.room.join", "topK": 3},
+    {"id": "faq-nearby-no-loc", "query": "附近没定位能推荐店吗", "expectSourceKey": "faq.nearby.how", "topK": 3},
+    {"id": "common-leftover-rice", "query": "隔夜米饭能不能吃", "expectSourceKey": "common.leftover.rice", "topK": 3},
+    {"id": "common-potato-black", "query": "土豆丝发黑", "expectSourceKey": "common.cut.potato", "topK": 3},
+    {"id": "common-braise", "query": "红烧肉怎么做", "expectSourceKey": "common.braise.meat", "topK": 3},
+    {"id": "faq-login", "query": "需要登录才能用吗", "expectSourceKey": "faq.login", "topK": 3},
+    {"id": "faq-want", "query": "想去是什么意思", "expectSourceKey": "faq.nearby.want", "topK": 3}
+  ],
+  "workflow": [
+    {"id": "vote-extract", "kind": "vote_options", "text": "火锅还是烤肉还是寿司", "expectOptions": ["火锅", "烤肉", "寿司"]},
+    {"id": "vote-confirm", "kind": "vote_resume", "text": "确认", "expect": true},
+    {"id": "vote-more-options", "kind": "vote_resume", "text": "火锅还是烤肉", "expect": true},
+    {"id": "vote-not-resume", "kind": "vote_resume", "text": "红烧肉怎么做", "expect": false},
+    {"id": "skip-photo", "kind": "skip_photo", "text": "不拍图", "expect": true},
+    {"id": "skip-photo-no", "kind": "skip_photo", "text": "番茄鸡蛋怎么做", "expect": false},
+    {"id": "locate-nearby", "kind": "locate_continue", "text": "附近吃什么", "expect": true},
+    {"id": "locate-enabled", "kind": "locate_continue", "text": "已开启定位，继续", "expect": true},
+    {"id": "locate-no", "kind": "locate_continue", "text": "红烧肉怎么做", "expect": false}
+  ]
+}
