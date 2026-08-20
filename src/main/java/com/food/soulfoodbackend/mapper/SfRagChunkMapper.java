@@ -41,4 +41,25 @@ public interface SfRagChunkMapper extends BaseMapper<SfRagChunk> {
 
     @Select("SELECT source_key FROM sf_rag_chunk WHERE embedding IS NULL")
     List<String> listKeysMissingEmbedding();
+
+    @Select("""
+            SELECT id, source_type AS sourceType, source_id AS sourceId, source_key AS sourceKey,
+                   title, content,
+                   (1.0 - LEAST(1.0,
+                        similarity(coalesce(title, ''), #{query}) * 1.4
+                        + similarity(coalesce(content, ''), #{query}))) AS distance
+            FROM sf_rag_chunk
+            WHERE coalesce(title, '') ILIKE #{likePattern} ESCAPE '!'
+               OR coalesce(content, '') ILIKE #{likePattern} ESCAPE '!'
+               OR similarity(coalesce(title, ''), #{query}) > 0.08
+               OR similarity(coalesce(content, ''), #{query}) > 0.08
+            ORDER BY (similarity(coalesce(title, ''), #{query}) * 1.4
+                     + similarity(coalesce(content, ''), #{query})) DESC,
+                     id ASC
+            LIMIT #{limit}
+            """)
+    List<RagHit> searchTrigram(
+            @Param("query") String query,
+            @Param("likePattern") String likePattern,
+            @Param("limit") int limit);
 }

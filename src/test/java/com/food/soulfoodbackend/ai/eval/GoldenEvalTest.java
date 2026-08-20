@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 离线黄金集：不打 LLM、不连库。路由走规则；RAG 用 classpath 种子 + 关键词排序；
- * 工作流只验 waiting 续跑文案。
+ * 离线黄金集：不打 LLM、不连库。路由走规则；RAG 用 classpath 种子 + 内存近似打分
+ *（线上 lexical 为 pg_trgm）；工作流只验 waiting 续跑文案。
  */
 class GoldenEvalTest {
 

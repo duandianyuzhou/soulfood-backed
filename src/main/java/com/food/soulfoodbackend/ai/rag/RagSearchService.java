@@ -1,8 +1,6 @@
 package com.food.soulfoodbackend.ai.rag;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.food.soulfoodbackend.config.AiRagProperties;
-import com.food.soulfoodbackend.domain.entity.SfRagChunk;
 import com.food.soulfoodbackend.mapper.SfRagChunkMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,9 +62,16 @@ public class RagSearchService {
     }
 
     private List<RagHit> searchLexical(String query, int topK) {
-        List<SfRagChunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<SfRagChunk>()
-                .orderByAsc(SfRagChunk::getId));
-        return RagLexicalRanker.rank(query.trim(), chunks, topK);
+        String q = query.trim();
+        return chunkMapper.searchTrigram(q, likePattern(q), topK);
+    }
+
+    static String likePattern(String query) {
+        String escaped = query
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+        return "%" + escaped + "%";
     }
 
     public String formatForPrompt(List<RagHit> hits) {

@@ -18,9 +18,9 @@ public class AiRagProperties {
     @Data
     public static class Rag {
         /**
-         * lexical：只关键词
+         * lexical：只 pg_trgm
          * embedding：只向量
-         * hybrid / auto：关键词 + 向量 RRF；向量失败则退回关键词
+         * hybrid / auto：pg_trgm + 向量 RRF；向量失败则退回 pg_trgm
          */
         private String mode = "lexical";
         private boolean ingestOnStartup = true;

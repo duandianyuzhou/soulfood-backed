@@ -9,6 +9,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * 离线近似打分（黄金集不连库）。线上 lexical 走 Postgres pg_trgm。
+ */
 public final class RagLexicalRanker {
 
     private RagLexicalRanker() {
