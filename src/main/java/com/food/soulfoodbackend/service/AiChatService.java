@@ -434,16 +434,10 @@ public class AiChatService {
             Double lat,
             Double lng) {
         List<RagHit> hits = safeSearch(userText);
-        String systemPrompt = buildRagSystemPrompt(userId, lat, lng, hits);
-        String reply = safeCall(() -> {
-            var spec = statelessChatClient.prompt().system(systemPrompt);
-            applyHistory(spec, conversationId);
-            return spec.user(userText).call().content();
-        }, "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。");
+        String reply = buildRagDirectReply(userText, hits);
         persistTurn(conversationId, userText, reply);
         List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(reply, userId, lat, lng));
         messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
-        memoryExtractionService.scheduleExtraction(userId, conversationId, userText, reply);
         return new ChatResponse(conversationId, reply, cards);
     }
 
@@ -455,47 +449,44 @@ public class AiChatService {
             Double lng) {
         String runId = "rag-" + conversationId;
         List<RagHit> hits = safeSearch(userText);
-        String systemPrompt = buildRagSystemPrompt(userId, lat, lng, hits);
-        AtomicReference<StringBuilder> buffer = new AtomicReference<>(new StringBuilder());
+        String reply = buildRagDirectReply(userText, hits);
+        persistTurn(conversationId, userText, reply);
+        List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(reply, userId, lat, lng));
+        messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
+        List<String> lines = new ArrayList<>();
+        lines.add(streamEmitter.workflow(runId, "知识检索", "running"));
+        lines.add(streamEmitter.step(runId, "retrieve", "检索知识库", "running", null));
+        lines.add(streamEmitter.step(
+                runId,
+                "retrieve",
+                "检索知识库",
+                "done",
+                hits.isEmpty() ? "未命中" : "命中 " + hits.size() + " 条"));
+        lines.add(streamEmitter.workflow(runId, "知识检索", "done"));
+        lines.add(streamEmitter.chunk(reply));
+        if (!cards.isEmpty()) {
+            lines.add(streamEmitter.cards(cards));
+        }
+        lines.add(streamEmitter.done(conversationId, cards));
+        return Flux.fromIterable(lines);
+    }
 
-        Flux<String> preamble = Flux.just(
-                streamEmitter.workflow(runId, "知识检索", "running"),
-                streamEmitter.step(runId, "retrieve", "检索知识库", "running", null),
-                streamEmitter.step(
-                        runId,
-                        "retrieve",
-                        "检索知识库",
-                        "done",
-                        hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"),
-                streamEmitter.step(runId, "compose", "生成回答", "running", "正在根据资料写回复"));
-
-        var spec = statelessChatClient.prompt().system(systemPrompt);
-        applyHistory(spec, conversationId);
-        spec.user(userText);
-        Flux<String> chunks = mapStreamChunks(spec.stream().content(), buffer, conversationId)
-                .onErrorResume(ex -> {
-                    log.warn("RAG stream failed: {}", ex.getMessage());
-                    String fallback = "我先根据知识库给你一个简短建议：优先看忌口，再选具体的店或菜。";
-                    buffer.get().append(fallback);
-                    return Flux.just(streamEmitter.chunk(fallback));
-                });
-
-        Flux<String> finishing = Mono.fromCallable(() -> {
-            String fullReply = buffer.get().toString();
-            if (fullReply.isBlank()) {
-                fullReply = "暂时没有检索到足够资料，你可以换个问法，或去菜谱库看看。";
+    private static String buildRagDirectReply(String userText, List<RagHit> hits) {
+        if (hits == null || hits.isEmpty()) {
+            return "知识库里暂时没有特别贴合的说明。你可以换个菜名或说法，或去菜谱库看看。";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("根据知识库，和这个问题相关的内容如下：\n\n");
+        for (int i = 0; i < hits.size(); i++) {
+            RagHit hit = hits.get(i);
+            String title = hit.getTitle() == null ? "资料" : hit.getTitle().trim();
+            String content = hit.getContent() == null ? "" : hit.getContent().trim();
+            sb.append(i + 1).append(". ").append(title).append('\n');
+            if (!content.isEmpty()) {
+                sb.append(content).append("\n\n");
             }
-            persistTurn(conversationId, userText, fullReply);
-            List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(fullReply, userId, lat, lng));
-            messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
-            memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
-            return List.of(
-                    streamEmitter.step(runId, "compose", "生成回答", "done", "已生成"),
-                    streamEmitter.workflow(runId, "知识检索", "done"),
-                    streamEmitter.done(conversationId, cards));
-        }).flatMapMany(Flux::fromIterable);
-
-        return preamble.concatWith(chunks).concatWith(finishing);
+        }
+        return sb.toString().trim();
     }
 
     private List<RagHit> safeSearch(String query) {
@@ -505,14 +496,6 @@ public class AiChatService {
             log.warn("RAG search failed: {}", ex.getMessage());
             return List.of();
         }
-    }
-
-    private String buildRagSystemPrompt(Long userId, Double lat, Double lng, List<RagHit> hits) {
-        return contextService.buildSystemPrompt(userId, lat, lng) + """
-
-                【检索结果】来源可能是菜谱、产品 FAQ 或饮食常识，请按类型使用，不要把常识当成某道菜的步骤。
-                只根据下列资料回答；资料不足时明确说不确定，不要编造本 App 不存在的功能。
-                """ + ragSearchService.formatForPrompt(hits);
     }
 
     private void persistTurn(String conversationId, String userText, String reply) {
