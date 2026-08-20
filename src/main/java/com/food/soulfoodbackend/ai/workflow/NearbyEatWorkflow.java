@@ -1,5 +1,6 @@
 package com.food.soulfoodbackend.ai.workflow;
 
+import com.food.soulfoodbackend.ai.router.ChatIntent;
 import com.food.soulfoodbackend.ai.stream.ChatStreamEmitter;
 import com.food.soulfoodbackend.dto.ai.ChatActionCardDto;
 import com.food.soulfoodbackend.dto.ai.WorkflowSnapshotDto;
@@ -26,6 +27,7 @@ public class NearbyEatWorkflow {
     private final RestaurantService restaurantService;
     private final UserPreferenceService preferenceService;
     private final ChatStreamEmitter streamEmitter;
+    private final PendingWorkflowStore pendingStore;
 
     public WorkflowResult run(String conversationId, String userText, Long userId, Double lat, Double lng) {
         String runId = WorkflowSupport.runId("nearby");
@@ -34,13 +36,39 @@ public class NearbyEatWorkflow {
         events.add(streamEmitter.workflow(runId, snapshot.getTitle(), "running"));
 
         WorkflowSupport.upsertStep(streamEmitter, events, snapshot, "locate", "确认位置", "running", null);
+        return afterLocate(events, snapshot, conversationId, userText, userId, lat, lng);
+    }
+
+    public WorkflowResult resume(PendingWorkflowSession session, Double lat, Double lng, String extraMessage) {
+        WorkflowSnapshotDto snapshot = session.getSnapshot();
+        List<String> events = new ArrayList<>();
+        snapshot.setStatus("running");
+        events.add(streamEmitter.workflow(snapshot.getRunId(), snapshot.getTitle(), "running"));
+        String userText = extraMessage == null || extraMessage.isBlank()
+                ? session.getUserText()
+                : session.getUserText() + " " + extraMessage;
+        Double useLat = lat != null ? lat : session.getLat();
+        Double useLng = lng != null ? lng : session.getLng();
+        WorkflowSupport.upsertStep(streamEmitter, events, snapshot, "locate", "确认位置", "running", null);
+        return afterLocate(events, snapshot, session.getConversationId(), userText, session.getUserId(), useLat, useLng);
+    }
+
+    private WorkflowResult afterLocate(
+            List<String> events,
+            WorkflowSnapshotDto snapshot,
+            String conversationId,
+            String userText,
+            Long userId,
+            Double lat,
+            Double lng) {
         if (lat == null || lng == null) {
-            WorkflowSupport.completeStep(streamEmitter, events, snapshot, "locate", "failed", "未授权定位");
-            String reply = "要推荐附近餐厅，需要先开启定位。你也可以直接说想吃的品类，或去「附近觅食」页授权位置。";
-            snapshot.setStatus("failed");
-            events.add(streamEmitter.workflow(runId, snapshot.getTitle(), "failed"));
+            WorkflowSupport.completeStep(streamEmitter, events, snapshot, "locate", "waiting", "等待定位");
+            snapshot.setStatus("waiting");
+            events.add(streamEmitter.workflow(snapshot.getRunId(), snapshot.getTitle(), "waiting"));
+            String reply = "要推荐附近餐厅需要定位。开启定位后点流程卡继续，或再说一次「附近吃什么」。";
             events.add(streamEmitter.chunk(reply));
-            return new WorkflowResult(events, reply, List.of(), snapshot, false);
+            savePending(snapshot, conversationId, userText, userId);
+            return new WorkflowResult(events, reply, List.of(), snapshot, true);
         }
         WorkflowSupport.completeStep(streamEmitter, events, snapshot, "locate", "done",
                 String.format(Locale.ROOT, "已定位 %.4f, %.4f", lat, lng));
@@ -55,8 +83,9 @@ public class NearbyEatWorkflow {
             WorkflowSupport.completeStep(streamEmitter, events, snapshot, "nearby_search", "failed", "搜索失败");
             String reply = "附近餐厅暂时搜不到，请稍后再试，或换个关键词。";
             snapshot.setStatus("failed");
-            events.add(streamEmitter.workflow(runId, snapshot.getTitle(), "failed"));
+            events.add(streamEmitter.workflow(snapshot.getRunId(), snapshot.getTitle(), "failed"));
             events.add(streamEmitter.chunk(reply));
+            pendingStore.remove(snapshot.getRunId());
             return new WorkflowResult(events, reply, List.of(), snapshot, false);
         }
         WorkflowSupport.completeStep(streamEmitter, events, snapshot, "nearby_search", "done",
@@ -100,12 +129,25 @@ public class NearbyEatWorkflow {
         WorkflowSupport.completeStep(streamEmitter, events, snapshot, "present_options", "done",
                 top.isEmpty() ? "无推荐" : "推荐 " + top.size() + " 家");
         snapshot.setStatus("done");
-        events.add(streamEmitter.workflow(runId, snapshot.getTitle(), "done"));
+        events.add(streamEmitter.workflow(snapshot.getRunId(), snapshot.getTitle(), "done"));
         if (!cards.isEmpty()) {
             events.add(streamEmitter.cards(cards));
         }
         events.add(streamEmitter.chunk(reply.toString().trim()));
+        pendingStore.remove(snapshot.getRunId());
         return new WorkflowResult(events, reply.toString().trim(), cards, snapshot, false);
+    }
+
+    private void savePending(WorkflowSnapshotDto snapshot, String conversationId, String userText, Long userId) {
+        PendingWorkflowSession session = new PendingWorkflowSession();
+        session.setRunId(snapshot.getRunId());
+        session.setKind(ChatIntent.NEARBY_EAT);
+        session.setConversationId(conversationId);
+        session.setUserId(userId);
+        session.setWaitingStepId("locate");
+        session.setUserText(userText);
+        session.setSnapshot(snapshot);
+        pendingStore.put(session);
     }
 
     static String extractKeyword(String text) {
@@ -119,6 +161,14 @@ public class NearbyEatWorkflow {
             }
         }
         return null;
+    }
+
+    public static boolean isLocateContinue(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        return text.contains("继续") || text.contains("已定位") || text.contains("开了定位")
+                || text.contains("授权了") || text.contains("附近") || text.contains("再找");
     }
 
     static List<RestaurantDto> filterByPreference(List<RestaurantDto> items, PreferenceResponse pref) {

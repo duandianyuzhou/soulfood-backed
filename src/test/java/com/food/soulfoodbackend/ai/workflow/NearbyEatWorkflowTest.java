@@ -19,6 +19,13 @@ class NearbyEatWorkflowTest {
     }
 
     @Test
+    void locateContinueMatchesNearbyOrAuth() {
+        assertTrue(NearbyEatWorkflow.isLocateContinue("附近吃什么"));
+        assertTrue(NearbyEatWorkflow.isLocateContinue("已开启定位，继续"));
+        assertTrue(!NearbyEatWorkflow.isLocateContinue("红烧肉怎么做"));
+    }
+
+    @Test
     void filtersAllergensAndCoriander() {
         List<RestaurantDto> items = List.of(
                 shop("香菜牛肉面", "面"),

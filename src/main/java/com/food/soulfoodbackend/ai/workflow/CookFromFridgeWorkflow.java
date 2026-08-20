@@ -273,7 +273,7 @@ public class CookFromFridgeWorkflow {
         return false;
     }
 
-    static boolean isSkipPhoto(String text) {
+    public static boolean isSkipPhoto(String text) {
         if (!StringUtils.hasText(text)) {
             return false;
         }
@@ -286,7 +286,7 @@ public class CookFromFridgeWorkflow {
         return false;
     }
 
-    static List<String> extractTextIngredients(String text) {
+    public static List<String> extractTextIngredients(String text) {
         if (!StringUtils.hasText(text)) {
             return List.of();
         }

@@ -13,6 +13,7 @@ import com.food.soulfoodbackend.ai.workflow.NearbyEatWorkflow;
 import com.food.soulfoodbackend.ai.workflow.PendingWorkflowSession;
 import com.food.soulfoodbackend.ai.workflow.PendingWorkflowStore;
 import com.food.soulfoodbackend.ai.workflow.VoteRoomWorkflow;
+import com.food.soulfoodbackend.ai.workflow.WorkflowRegistry;
 import com.food.soulfoodbackend.ai.workflow.WorkflowResult;
 import com.food.soulfoodbackend.mapper.SfAiChatMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -82,9 +83,7 @@ public class AiChatService {
     private final RagSearchService ragSearchService;
     private final ChatStreamEmitter streamEmitter;
     private final IntentRouter intentRouter;
-    private final NearbyEatWorkflow nearbyEatWorkflow;
-    private final CookFromFridgeWorkflow cookFromFridgeWorkflow;
-    private final VoteRoomWorkflow voteRoomWorkflow;
+    private final WorkflowRegistry workflowRegistry;
     private final PendingWorkflowStore pendingWorkflowStore;
     private final ToolCallGuard toolCallGuard;
     private final Cache<String, RecommendRecipesResponse> recipeRecommendCache;
@@ -109,9 +108,7 @@ public class AiChatService {
             RagSearchService ragSearchService,
             ChatStreamEmitter streamEmitter,
             IntentRouter intentRouter,
-            NearbyEatWorkflow nearbyEatWorkflow,
-            CookFromFridgeWorkflow cookFromFridgeWorkflow,
-            VoteRoomWorkflow voteRoomWorkflow,
+            WorkflowRegistry workflowRegistry,
             PendingWorkflowStore pendingWorkflowStore,
             ToolCallGuard toolCallGuard,
             OrderTools orderTools) {
@@ -130,9 +127,7 @@ public class AiChatService {
         this.ragSearchService = ragSearchService;
         this.streamEmitter = streamEmitter;
         this.intentRouter = intentRouter;
-        this.nearbyEatWorkflow = nearbyEatWorkflow;
-        this.cookFromFridgeWorkflow = cookFromFridgeWorkflow;
-        this.voteRoomWorkflow = voteRoomWorkflow;
+        this.workflowRegistry = workflowRegistry;
         this.pendingWorkflowStore = pendingWorkflowStore;
         this.toolCallGuard = toolCallGuard;
         this.recipeRecommendCache = Caffeine.newBuilder()
@@ -161,19 +156,19 @@ public class AiChatService {
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
         WorkflowResult pendingResume = resumePendingIfNeeded(
-                conversationId, userText, userId, imageBase64, imageMimeType, hasImage);
+                conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
         if (pendingResume != null) {
             return finishWorkflow(conversationId, userText, userId, pendingResume);
         }
         RouteDecision decision = intentRouter.route(userText, hasImage, lat, lng);
         return switch (decision.intent()) {
             case RECIPE_RAG -> chatWithRag(conversationId, userText, userId, lat, lng);
-            case NEARBY_EAT -> finishWorkflow(conversationId, userText, userId,
-                    nearbyEatWorkflow.run(conversationId, userText, userId, lat, lng));
-            case COOK_FROM_FRIDGE -> finishWorkflow(conversationId, userText, userId,
-                    cookFromFridgeWorkflow.start(conversationId, userText, userId, imageBase64, imageMimeType));
-            case VOTE_ROOM -> finishWorkflow(conversationId, userText, userId,
-                    voteRoomWorkflow.start(conversationId, userText, userId, lat, lng));
+            case NEARBY_EAT, COOK_FROM_FRIDGE, VOTE_ROOM -> finishWorkflow(
+                    conversationId,
+                    userText,
+                    userId,
+                    workflowRegistry.start(
+                            decision.intent(), conversationId, userText, userId, lat, lng, imageBase64, imageMimeType));
             case SIMPLE_CHAT -> chatSimple(conversationId, userText, userId, lat, lng);
             case OPEN_REACT -> chatWithTools(
                     conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
@@ -192,19 +187,15 @@ public class AiChatService {
         prepareConversation(conversationId, userId, userText);
         boolean hasImage = hasImage(imageBase64);
         WorkflowResult pendingResume = resumePendingIfNeeded(
-                conversationId, userText, userId, imageBase64, imageMimeType, hasImage);
+                conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
         if (pendingResume != null) {
             return emitWorkflowStream(conversationId, userText, userId, pendingResume);
         }
         ChatIntent intent = intentRouter.route(userText, hasImage, lat, lng).intent();
         return switch (intent) {
             case RECIPE_RAG -> chatStreamWithRag(conversationId, userText, userId, lat, lng);
-            case NEARBY_EAT -> streamWorkflow(conversationId, userText, userId,
-                    () -> nearbyEatWorkflow.run(conversationId, userText, userId, lat, lng));
-            case COOK_FROM_FRIDGE -> streamWorkflow(conversationId, userText, userId,
-                    () -> cookFromFridgeWorkflow.start(conversationId, userText, userId, imageBase64, imageMimeType));
-            case VOTE_ROOM -> streamWorkflow(conversationId, userText, userId,
-                    () -> voteRoomWorkflow.start(conversationId, userText, userId, lat, lng));
+            case NEARBY_EAT, COOK_FROM_FRIDGE, VOTE_ROOM -> streamWorkflow(conversationId, userText, userId, () ->
+                    workflowRegistry.start(intent, conversationId, userText, userId, lat, lng, imageBase64, imageMimeType));
             case SIMPLE_CHAT -> chatStreamSimple(conversationId, userText, userId, lat, lng);
             case OPEN_REACT -> chatStreamWithTools(
                     conversationId, userText, userId, lat, lng, imageBase64, imageMimeType, hasImage);
@@ -271,39 +262,58 @@ public class AiChatService {
         }
         String userText = StringUtils.hasText(request.getMessage()) ? request.getMessage().trim() : "确认并继续";
         prepareConversation(session.getConversationId(), userId, userText);
-        return Mono.fromCallable(() -> resumePending(session, request))
+        return Mono.fromCallable(() -> workflowRegistry.resume(session, request))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMapMany(result -> emitWorkflowStream(session.getConversationId(), userText, userId, result));
-    }
-
-    private WorkflowResult resumePending(PendingWorkflowSession session, WorkflowContinueRequest request) {
-        if (session.getKind() == ChatIntent.COOK_FROM_FRIDGE) {
-            return cookFromFridgeWorkflow.resume(
-                    session, request.getImageBase64(), request.getImageMimeType(), request.getMessage());
-        }
-        return voteRoomWorkflow.resume(session, request.getOptions(), request.getMessage());
     }
 
     private WorkflowResult resumePendingIfNeeded(
             String conversationId,
             String userText,
             Long userId,
+            Double lat,
+            Double lng,
             String imageBase64,
             String imageMimeType,
             boolean hasImage) {
         PendingWorkflowSession session = pendingWorkflowStore.getByConversation(conversationId);
-        if (session == null || session.getKind() != ChatIntent.COOK_FROM_FRIDGE) {
+        if (session == null || session.getKind() == null) {
             return null;
         }
-        if (!"vision".equals(session.getWaitingStepId())) {
-            return null;
+        WorkflowContinueRequest request = new WorkflowContinueRequest();
+        request.setMessage(userText);
+        request.setImageBase64(imageBase64);
+        request.setImageMimeType(imageMimeType);
+        request.setLat(lat);
+        request.setLng(lng);
+        if (session.getKind() == ChatIntent.COOK_FROM_FRIDGE) {
+            if (!"vision".equals(session.getWaitingStepId())) {
+                return null;
+            }
+            if (!hasImage
+                    && !CookFromFridgeWorkflow.isSkipPhoto(userText)
+                    && CookFromFridgeWorkflow.extractTextIngredients(userText).isEmpty()) {
+                return null;
+            }
+            return workflowRegistry.resume(session, request);
         }
-        if (!hasImage
-                && !CookFromFridgeWorkflow.isSkipPhoto(userText)
-                && CookFromFridgeWorkflow.extractTextIngredients(userText).isEmpty()) {
-            return null;
+        if (session.getKind() == ChatIntent.VOTE_ROOM) {
+            if (!"collect_options".equals(session.getWaitingStepId()) || !VoteRoomWorkflow.isResumeChat(userText)) {
+                return null;
+            }
+            return workflowRegistry.resume(session, request);
         }
-        return cookFromFridgeWorkflow.resume(session, imageBase64, imageMimeType, userText);
+        if (session.getKind() == ChatIntent.NEARBY_EAT) {
+            if (!"locate".equals(session.getWaitingStepId())) {
+                return null;
+            }
+            boolean hasLocation = lat != null && lng != null;
+            if (!hasLocation || !NearbyEatWorkflow.isLocateContinue(userText)) {
+                return null;
+            }
+            return workflowRegistry.resume(session, request);
+        }
+        return null;
     }
 
     private ChatResponse finishWorkflow(String conversationId, String userText, Long userId, WorkflowResult result) {

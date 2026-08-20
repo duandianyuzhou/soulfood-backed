@@ -12,6 +12,8 @@ public class AiRagProperties {
     private String embeddingModel = "qwen3-embedding:0.6b";
     private int embeddingDims = 1024;
     private Rag rag = new Rag();
+    private int toolMaxCalls = 5;
+    private int toolTimeoutMs = 8000;
 
     @Data
     public static class Rag {

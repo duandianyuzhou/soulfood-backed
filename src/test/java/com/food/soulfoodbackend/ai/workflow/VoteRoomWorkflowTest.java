@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VoteRoomWorkflowTest {
@@ -18,6 +19,9 @@ class VoteRoomWorkflowTest {
     @Test
     void ignoresBareVoteIntent() {
         assertTrue(VoteRoomWorkflow.extractOptions("帮我开个投票组局").isEmpty());
+        assertTrue(VoteRoomWorkflow.isConfirm("确认"));
+        assertTrue(VoteRoomWorkflow.isResumeChat("火锅还是烤肉"));
+        assertFalse(VoteRoomWorkflow.isResumeChat("红烧肉怎么做"));
     }
 
     @Test

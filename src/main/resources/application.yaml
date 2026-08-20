@@ -79,6 +79,8 @@ app:
     memory-extraction-enabled: true
     embedding-model: qwen3-embedding:0.6b
     embedding-dims: 1024
+    tool-max-calls: 5
+    tool-timeout-ms: 8000
     rag:
       mode: embedding
       ingest-on-startup: true

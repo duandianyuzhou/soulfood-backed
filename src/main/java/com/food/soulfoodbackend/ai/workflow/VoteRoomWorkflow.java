@@ -213,6 +213,20 @@ public class VoteRoomWorkflow {
         return options;
     }
 
+    static boolean isConfirm(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        String raw = text.trim();
+        return raw.contains("确认") || raw.contains("就这些") || raw.contains("用这些")
+                || raw.contains("开房") || raw.contains("创建房间") || raw.equals("好的")
+                || raw.equals("可以") || raw.equals("行") || raw.contains("开始投票");
+    }
+
+    public static boolean isResumeChat(String text) {
+        return isConfirm(text) || extractOptions(text).size() >= 2;
+    }
+
     static String topicOf(String text) {
         if (StringUtils.hasText(text) && text.contains("中午")) {
             return "中午吃什么";

@@ -13,4 +13,6 @@ public class WorkflowContinueRequest {
     private List<String> options;
     private String imageBase64;
     private String imageMimeType;
+    private Double lat;
+    private Double lng;
 }
