@@ -27,7 +27,7 @@ public class EmbeddingClient {
 
     public boolean isEnabled() {
         String mode = mode();
-        return "embedding".equals(mode) || "auto".equals(mode);
+        return "embedding".equals(mode) || "auto".equals(mode) || "hybrid".equals(mode);
     }
 
     public float[] embed(String text) {

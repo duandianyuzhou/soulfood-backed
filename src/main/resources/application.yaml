@@ -82,6 +82,6 @@ app:
     tool-max-calls: 5
     tool-timeout-ms: 8000
     rag:
-      mode: embedding
+      mode: hybrid
       ingest-on-startup: true
       top-k: 5

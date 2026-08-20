@@ -18,9 +18,9 @@ public class AiRagProperties {
     @Data
     public static class Rag {
         /**
-         * lexical：关键词，不调 embedding（默认，智谱未开通向量时用）
-         * embedding：必须走向量模型
-         * auto：有向量则向量，失败或全空则关键词
+         * lexical：只关键词
+         * embedding：只向量
+         * hybrid / auto：关键词 + 向量 RRF；向量失败则退回关键词
          */
         private String mode = "lexical";
         private boolean ingestOnStartup = true;

@@ -37,15 +37,25 @@ public class RagSearchService {
         if ("embedding".equals(mode)) {
             return searchVector(query, topK);
         }
+        return searchHybrid(query, topK);
+    }
+
+    private List<RagHit> searchHybrid(String query, int topK) {
+        int pool = Math.min(20, Math.max(topK * 4, 10));
+        List<RagHit> lexical = searchLexical(query, pool);
+        List<RagHit> vector = List.of();
         try {
-            List<RagHit> hits = searchVector(query, topK);
-            if (!hits.isEmpty()) {
-                return hits;
-            }
+            vector = searchVector(query, pool);
         } catch (Exception ex) {
-            log.warn("向量检索失败，回退关键词: {}", ex.getMessage());
+            log.warn("混合检索向量路失败，仅用关键词: {}", ex.getMessage());
         }
-        return searchLexical(query, topK);
+        if (vector.isEmpty()) {
+            return lexical.stream().limit(topK).toList();
+        }
+        if (lexical.isEmpty()) {
+            return vector.stream().limit(topK).toList();
+        }
+        return RagHybridRanker.fuse(lexical, vector, topK);
     }
 
     private List<RagHit> searchVector(String query, int topK) {
