@@ -466,7 +466,8 @@ public class AiChatService {
                         "retrieve",
                         "检索知识库",
                         "done",
-                        hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"));
+                        hits.isEmpty() ? "未命中，将按通用知识回答" : "命中 " + hits.size() + " 条"),
+                streamEmitter.step(runId, "compose", "生成回答", "running", "正在根据资料写回复"));
 
         var spec = statelessChatClient.prompt().system(systemPrompt);
         applyHistory(spec, conversationId);
@@ -479,7 +480,7 @@ public class AiChatService {
                     return Flux.just(streamEmitter.chunk(fallback));
                 });
 
-        Mono<String> done = Mono.fromCallable(() -> {
+        Flux<String> finishing = Mono.fromCallable(() -> {
             String fullReply = buffer.get().toString();
             if (fullReply.isBlank()) {
                 fullReply = "暂时没有检索到足够资料，你可以换个问法，或去菜谱库看看。";
@@ -488,10 +489,13 @@ public class AiChatService {
             List<ChatActionCardDto> cards = mergeRagCards(hits, cardResolver.resolve(fullReply, userId, lat, lng));
             messageMetaService.saveCardsOnLatestAssistant(conversationId, cards);
             memoryExtractionService.scheduleExtraction(userId, conversationId, userText, fullReply);
-            return streamEmitter.done(conversationId, cards);
-        });
+            return List.of(
+                    streamEmitter.step(runId, "compose", "生成回答", "done", "已生成"),
+                    streamEmitter.workflow(runId, "知识检索", "done"),
+                    streamEmitter.done(conversationId, cards));
+        }).flatMapMany(Flux::fromIterable);
 
-        return preamble.concatWith(chunks).concatWith(done.flux());
+        return preamble.concatWith(chunks).concatWith(finishing);
     }
 
     private List<RagHit> safeSearch(String query) {

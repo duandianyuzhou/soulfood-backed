@@ -1,5 +1,6 @@
 package com.food.soulfoodbackend.config;
 
+import com.food.soulfoodbackend.ai.CapacityFallbackChatModel;
 import com.food.soulfoodbackend.ai.react.GuardedToolCallback;
 import com.food.soulfoodbackend.ai.react.ToolCallGuard;
 import com.food.soulfoodbackend.chat.PgChatMemoryRepository;
@@ -8,11 +9,18 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.ai.ollama.api.OllamaApi;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Configuration
 public class AiConfig {
@@ -42,38 +50,62 @@ public class AiConfig {
         return guarded;
     }
 
-    /** 复杂 ReAct（非流式）：智谱 GLM + 工具 + 会话记忆 */
     @Bean
-    public ChatClient chatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory, ToolCallback[] guardedAiTools) {
-        return ChatClient.builder(openAiChatModel)
+    public OllamaChatModel ollamaChatModel(
+            ObjectProvider<OllamaApi> ollamaApi,
+            @Value("${spring.ai.ollama.base-url:http://127.0.0.1:11434}") String ollamaBaseUrl,
+            @Value("${spring.ai.ollama.chat.options.model:qwen3.5:2b}") String ollamaChatModel) {
+        OllamaApi api = ollamaApi.getIfAvailable();
+        if (api == null) {
+            api = OllamaApi.builder().baseUrl(ollamaBaseUrl).build();
+        }
+        return OllamaChatModel.builder()
+                .ollamaApi(api)
+                .defaultOptions(OllamaChatOptions.builder()
+                        .model(ollamaChatModel)
+                        .temperature(0.7)
+                        .build())
+                .build();
+    }
+
+    @Bean
+    @Primary
+    public ChatModel chatModel(OpenAiChatModel openAiChatModel, OllamaChatModel ollamaChatModel) {
+        return new CapacityFallbackChatModel(openAiChatModel, ollamaChatModel);
+    }
+
+    /** 复杂 ReAct（非流式）：智谱 GLM，429 时改 Ollama qwen；带工具 + 会话记忆 */
+    @Bean
+    public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory, ToolCallback[] guardedAiTools) {
+        return ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultToolCallbacks(guardedAiTools)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 
-    /** 流式 ReAct：智谱 GLM + 工具；记忆由业务在流结束后写入，避免 advisor 把同一轮存两遍 */
+    /** 流式 ReAct：智谱 GLM，429 时改 Ollama qwen；记忆由业务在流结束后写入 */
     @Bean
-    public ChatClient toolStreamChatClient(OpenAiChatModel openAiChatModel, ToolCallback[] guardedAiTools) {
-        return ChatClient.builder(openAiChatModel)
+    public ChatClient toolStreamChatClient(ChatModel chatModel, ToolCallback[] guardedAiTools) {
+        return ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultToolCallbacks(guardedAiTools)
                 .build();
     }
 
-    /** 简单闲聊（非流式）：智谱 GLM + 会话记忆，不带工具 */
+    /** 简单闲聊（非流式）：智谱 GLM，429 时改 Ollama qwen */
     @Bean
-    public ChatClient simpleChatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory) {
-        return ChatClient.builder(openAiChatModel)
+    public ChatClient simpleChatClient(ChatModel chatModel, ChatMemory chatMemory) {
+        return ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 
-    /** 一次性 / 流式生成：智谱 GLM，无记忆 */
+    /** 一次性 / 流式生成：智谱 GLM，429 时改 Ollama qwen，无记忆 */
     @Bean
-    public ChatClient statelessChatClient(OpenAiChatModel openAiChatModel) {
-        return ChatClient.builder(openAiChatModel)
+    public ChatClient statelessChatClient(ChatModel chatModel) {
+        return ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .build();
     }
